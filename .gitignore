@@ -1,0 +1,13 @@
+*.log
+AutogluonModels/
+__pycache__/*
+.ipynb_checkpoints/
+.vscode/
+.DS_Store
+
+*venv*/
+*.csv
+*.zip
+data/
+results/
+*.txt
