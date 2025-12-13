@@ -7,3 +7,8 @@ catboost
 kagglehub
 matplotlib
 seaborn
+
+# Optional (for train_jax_mlp.py)
+jax[cpu]
+flax
+optax

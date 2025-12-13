@@ -138,6 +138,20 @@ python distill_student.py \
 	--zip-output
 ```
 
+## Optional: JAX MLP (CPU)
+
+Sometimes helps on synthetic-tabular data. Requires installing `jax[cpu]`, `flax`, and `optax`.
+
+```zsh
+python train_jax_mlp.py \
+	--epochs 20 \
+	--batch-size 4096 \
+	--hidden 256,128,64 \
+	--embed-dim 16 \
+	--out sub/submission_jax.csv \
+	--zip-output
+```
+
 ## Useful knobs
 
 - `--chunk-size 50000` (lower if you hit RAM pressure)
