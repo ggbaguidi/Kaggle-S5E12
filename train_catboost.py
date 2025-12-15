@@ -49,6 +49,7 @@ def train_cv_and_predict(
     out_path: Path,
     id_col: str | None,
     target_col: str | None,
+    oof_out: Path | None,
     extra_train_path: Path | None,
     extra_target_col: str | None,
     extra_weight: float,
@@ -210,6 +211,19 @@ def train_cv_and_predict(
         if verbose:
             print(f"[done] wrote {zip_path}", flush=True)
 
+    if oof_out is not None:
+        oof_df = pd.DataFrame(
+            {
+                "id": pd.to_numeric(train[id_col], errors="coerce").fillna(0).astype(np.int64),
+                "y": y.astype(np.int64, copy=False),
+                "oof_pred": np.clip(oof_ens, 0.0, 1.0).astype(np.float32),
+            }
+        )
+        oof_out.parent.mkdir(parents=True, exist_ok=True)
+        oof_df.to_csv(oof_out, index=False)
+        if verbose:
+            print(f"[done] wrote {oof_out} rows={len(oof_df)}", flush=True)
+
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="CatBoost CPU CV trainer for diabetes probability")
@@ -218,6 +232,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", type=Path, default=Path("submission_cat.csv"))
     p.add_argument("--id-col", type=str, default=None)
     p.add_argument("--target-col", type=str, default=None)
+
+    p.add_argument("--oof-out", type=Path, default=None, help="Optional CSV output for OOF preds: id,y,oof_pred")
 
     p.add_argument("--extra-train", type=Path, default=None, help="Optional extra training CSV (e.g., original dataset)")
     p.add_argument("--extra-target-col", type=str, default=None, help="Target column name in extra train (default: same as --target-col)")
@@ -248,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
         out_path=args.out,
         id_col=args.id_col,
         target_col=args.target_col,
+        oof_out=args.oof_out,
         extra_train_path=args.extra_train,
         extra_target_col=args.extra_target_col,
         extra_weight=float(args.extra_weight),
