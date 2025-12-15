@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Blend multiple Kaggle submissions by averaging probabilities.
+"""Blend multiple Kaggle submissions by averaging probabilities (or logits).
 
 Usage:
   python blend_submissions.py --inputs sub/a.csv sub/b.csv --out sub/blend.csv
@@ -18,7 +18,30 @@ import numpy as np
 import pandas as pd
 
 
-def blend(inputs: list[Path], out: Path, weights: list[float] | None, zip_output: bool, verbose: int) -> None:
+def _logit(p: np.ndarray) -> np.ndarray:
+    p = np.clip(p, 1e-15, 1 - 1e-15)
+    return np.log(p) - np.log1p(-p)
+
+
+def _sigmoid(z: np.ndarray) -> np.ndarray:
+    # Stable sigmoid
+    z = np.asarray(z)
+    out = np.empty_like(z, dtype=np.float64)
+    pos = z >= 0
+    out[pos] = 1.0 / (1.0 + np.exp(-z[pos]))
+    ez = np.exp(z[~pos])
+    out[~pos] = ez / (1.0 + ez)
+    return out
+
+
+def blend(
+    inputs: list[Path],
+    out: Path,
+    weights: list[float] | None,
+    mode: str,
+    zip_output: bool,
+    verbose: int,
+) -> None:
     if len(inputs) < 2:
         raise ValueError("Provide at least 2 --inputs")
 
@@ -48,7 +71,16 @@ def blend(inputs: list[Path], out: Path, weights: list[float] | None, zip_output
             raise ValueError("--weights sum must be > 0")
         w = w / w.sum()
 
-    blended = np.clip((preds.T @ w), 0.0, 1.0)
+    mode = str(mode).strip().lower()
+    if mode not in {"prob", "logit"}:
+        raise ValueError("--mode must be one of: prob, logit")
+
+    if mode == "prob":
+        blended = np.clip((preds.T @ w), 0.0, 1.0)
+    else:
+        # Average in logit space, then map back to probabilities.
+        z = _logit(preds)
+        blended = np.clip(_sigmoid(z.T @ w), 0.0, 1.0)
 
     out.parent.mkdir(parents=True, exist_ok=True)
     sub = pd.DataFrame({"id": ids, "diagnosed_diabetes": blended})
@@ -70,11 +102,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--inputs", nargs="+", type=Path, required=True)
     p.add_argument("--out", type=Path, default=Path("submission_blend.csv"))
     p.add_argument("--weights", nargs="+", type=float, default=None)
+    p.add_argument("--mode", type=str, default="prob", help="Blend mode: prob (average probabilities) or logit (average logits)")
     p.add_argument("--zip-output", action="store_true")
     p.add_argument("--verbose", type=int, default=1)
     args = p.parse_args(argv)
 
-    blend(inputs=args.inputs, out=args.out, weights=args.weights, zip_output=bool(args.zip_output), verbose=int(args.verbose))
+    blend(
+        inputs=args.inputs,
+        out=args.out,
+        weights=args.weights,
+        mode=args.mode,
+        zip_output=bool(args.zip_output),
+        verbose=int(args.verbose),
+    )
     return 0
 
 
