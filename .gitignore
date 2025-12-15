@@ -8,6 +8,7 @@ __pycache__/*
 *venv*/
 *.csv
 *.zip
+*.json
 data/
 results/
 *.txt

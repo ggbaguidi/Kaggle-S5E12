@@ -96,7 +96,19 @@ Start with a simple weighted average (tune weights on CV).
 python blend_submissions.py \
 	--inputs sub/submission_lgbm.csv sub/submission_cat.csv \
 	--weights 0.6 0.4 \
+	--mode prob \
 	--out sub/submission_blend.csv \
+	--zip-output
+```
+
+Logit-space blending (often better than prob-averaging when models are miscalibrated):
+
+```zsh
+python blend_submissions.py \
+	--inputs sub/submission_lgbm.csv sub/submission_cat.csv \
+	--weights 0.6 0.4 \
+	--mode logit \
+	--out sub/submission_blend_logit.csv \
 	--zip-output
 ```
 
@@ -135,6 +147,30 @@ python distill_student.py \
 	--soft-alpha 1.0 \
 	--folds 5 \
 	--out sub/submission_student.csv \
+	--zip-output
+```
+
+### OOF stacking (meta-learner)
+
+Fit a logistic-regression meta-model on OOF predictions, then apply it to the corresponding test submissions.
+
+```zsh
+python train_lgbm.py \
+	--folds 5 --seeds 42,43,44 \
+	--oof-out sub/lgbm_oof.csv \
+	--out sub/submission_lgbm_for_stack.csv
+
+python train_catboost.py \
+	--folds 5 --seeds 42,43 \
+	--oof-out sub/cat_oof.csv \
+	--out sub/submission_cat_for_stack.csv
+
+python stack_oof.py \
+	--oof sub/lgbm_oof.csv sub/cat_oof.csv \
+	--subs sub/submission_lgbm_for_stack.csv sub/submission_cat_for_stack.csv \
+	--features logit \
+	--C 1.0 \
+	--out sub/submission_stack.csv \
 	--zip-output
 ```
 
