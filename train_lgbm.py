@@ -22,6 +22,7 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
+import os
 
 
 def _infer_cols(train: pd.DataFrame, id_col: str | None, target_col: str | None) -> tuple[str, str, list[str]]:
@@ -348,22 +349,22 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--early-stopping-rounds", type=int, default=200)
 
     p.add_argument("--learning-rate", type=float, default=0.03)
-    p.add_argument("--num-leaves", type=int, default=64)
+    p.add_argument("--num-leaves", type=int, default=128)
     p.add_argument("--max-depth", type=int, default=-1)
-    p.add_argument("--min-data-in-leaf", type=int, default=40)
-    p.add_argument("--min-sum-hessian-in-leaf", type=float, default=1e-3)
+    p.add_argument("--min-data-in-leaf", type=int, default=53)
+    p.add_argument("--min-sum-hessian-in-leaf", type=float, default=0.002357)
 
-    p.add_argument("--feature-fraction", type=float, default=0.8)
+    p.add_argument("--feature-fraction", type=float, default=0.95)
     p.add_argument("--bagging-fraction", type=float, default=0.8)
     p.add_argument("--bagging-freq", type=int, default=1)
 
     p.add_argument("--lambda-l1", type=float, default=0.0)
     p.add_argument("--lambda-l2", type=float, default=0.0)
 
-    p.add_argument("--cat-smooth", type=float, default=10.0)
-    p.add_argument("--cat-l2", type=float, default=10.0)
-    p.add_argument("--max-cat-to-onehot", type=int, default=4)
-    p.add_argument("--min-data-per-group", type=int, default=100)
+    p.add_argument("--cat-smooth", type=float, default=17.0)
+    p.add_argument("--cat-l2", type=float, default=29.0)
+    p.add_argument("--max-cat-to-onehot", type=int, default=7)
+    p.add_argument("--min-data-per-group", type=int, default=200)
 
     p.add_argument("--max-categories", type=int, default=2000, help="Cap unique categories per feature")
 
