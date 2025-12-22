@@ -67,6 +67,9 @@ export JAX_PLATFORM_NAME="${JAX_PLATFORM_NAME:-cpu}"
 : "${GROK_MODE:=0}"
 : "${GROK_FULL_PIPELINE:=0}"
 
+# If enabled, stages are skipped when their expected outputs + checkpoints already exist.
+: "${SKIP_IF_EXISTS:=1}"
+
 # Stage toggles (set to 0 to skip)
 : "${RUN_TEACHER:=1}"
 : "${RUN_ADV_WEIGHTS:=1}"
@@ -76,6 +79,13 @@ export JAX_PLATFORM_NAME="${JAX_PLATFORM_NAME:-cpu}"
 : "${RUN_BLEND:=1}"
 : "${RUN_STACK_OOF:=1}"
 : "${RUN_SCRATCH_ADV:=1}"  # long-running stage
+
+# Checkpoint saving
+: "${SAVE_BEST_MODELS:=1}"
+: "${CKPT_DIR:=checkpoints}"
+: "${FT_SAVE_DIR:=$CKPT_DIR/fttransformer}"
+: "${SCRATCH_SAVE_DIR:=$CKPT_DIR/jax_scratch_adv}"
+: "${SCRATCH_SAVE_METRIC:=logloss}"  # auc|logloss
 
 # Common dataset paths
 : "${TRAIN_CSV:=data/train.csv}"
@@ -150,6 +160,7 @@ export JAX_PLATFORM_NAME="${JAX_PLATFORM_NAME:-cpu}"
 
 # Scratch-adv defaults (requested command integrated as defaults)
 : "${SCRATCH_FOLDS:=5}"
+: "${SCRATCH_SEED:=42}"
 : "${SCRATCH_EPOCHS:=600}"
 : "${SCRATCH_BATCH_SIZE:=4096}"
 : "${SCRATCH_USE_ADV_WEIGHTS:=1}"
@@ -216,6 +227,47 @@ else
   echo "WARNING: venv activate script not found at '$VENV_ACTIVATE' (continuing with current Python: '$PYTHON_BIN')" >&2
 fi
 
+# -------------------------------
+# Helpers
+# -------------------------------
+
+_split_csv() {
+  # Usage: _split_csv "a,b,c"  -> prints one per line
+  local s="${1:-}"
+  s="${s// /}" # strip spaces
+  if [[ -z "$s" ]]; then
+    return 0
+  fi
+  # shellcheck disable=SC2001
+  echo "$s" | tr ',' '\n'
+}
+
+_ft_ckpts_complete() {
+  # Args: dir seeds_csv folds
+  local dir="$1"; local seeds_csv="$2"; local folds="$3"
+  local seed fold
+  for seed in $(_split_csv "$seeds_csv"); do
+    for ((fold=0; fold<folds; fold++)); do
+      if [[ ! -f "${dir}/ftt_seed${seed}_fold${fold}.msgpack" ]]; then
+        return 1
+      fi
+    done
+  done
+  return 0
+}
+
+_scratch_ckpts_complete() {
+  # Args: dir seed folds
+  local dir="$1"; local seed="$2"; local folds="$3"
+  local fold
+  for ((fold=0; fold<folds; fold++)); do
+    if [[ ! -f "${dir}/scratch_seed${seed}_fold${fold}.msgpack" ]]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
 # Preflight checks
 if [[ ! -f "$TRAIN_CSV" ]]; then
   echo "ERROR: $TRAIN_CSV not found" >&2
@@ -232,6 +284,19 @@ fi
 
 # 1) JAX teacher (FtTransformer) + OOF
 if [[ "${RUN_TEACHER}" == "1" ]]; then
+  goto_run_teacher=0
+  if [[ "${SKIP_IF_EXISTS}" == "1" && -f "$OUT_SUB_TEACHER" && -f "$OUT_OOF_TEACHER" ]]; then
+    if [[ "${SAVE_BEST_MODELS}" != "1" ]] || _ft_ckpts_complete "$FT_SAVE_DIR/teacher" "$FT_SEEDS_TEACHER" "$FOLDS"; then
+      echo "[skip] 01_jax_teacher (outputs/checkpoints already exist)"
+    else
+      echo "[info] 01_jax_teacher outputs exist but checkpoints incomplete; will run"
+      goto_run_teacher=1
+    fi
+  else
+    goto_run_teacher=1
+  fi
+
+  if [[ "${goto_run_teacher:-0}" == "1" ]]; then
   cmd_teacher=(
     "$PYTHON_BIN" train_jax_fttransformer.py
     --folds "$FOLDS"
@@ -252,10 +317,14 @@ if [[ "${RUN_TEACHER}" == "1" ]]; then
     --zip-output
     --verbose "$FT_VERBOSE"
   )
+  if [[ "${SAVE_BEST_MODELS}" == "1" ]]; then
+    cmd_teacher+=(--save-best-dir "$FT_SAVE_DIR/teacher")
+  fi
   if [[ "${FT_MAX_TRAIN_ROWS}" != "0" && -n "${FT_MAX_TRAIN_ROWS}" ]]; then
     cmd_teacher+=(--max-train-rows "$FT_MAX_TRAIN_ROWS")
   fi
   run "01_jax_teacher" "${cmd_teacher[@]}"
+  fi
 fi
 
 # 2) JAX adversarial weights
@@ -285,6 +354,19 @@ fi
 
 # 3) JAX teacher with adversarial weights + OOF
 if [[ "${RUN_TEACHER_ADVW}" == "1" ]]; then
+  goto_run_teacher_advw=0
+  if [[ "${SKIP_IF_EXISTS}" == "1" && -f "$OUT_SUB_TEACHER_ADVW" && -f "$OUT_OOF_TEACHER_ADVW" ]]; then
+    if [[ "${SAVE_BEST_MODELS}" != "1" ]] || _ft_ckpts_complete "$FT_SAVE_DIR/teacher_advw" "$FT_SEEDS_TEACHER" "$FOLDS"; then
+      echo "[skip] 03_jax_teacher_advw (outputs/checkpoints already exist)"
+    else
+      echo "[info] 03_jax_teacher_advw outputs exist but checkpoints incomplete; will run"
+      goto_run_teacher_advw=1
+    fi
+  else
+    goto_run_teacher_advw=1
+  fi
+
+  if [[ "${goto_run_teacher_advw:-0}" == "1" ]]; then
   cmd_teacher_advw=(
     "$PYTHON_BIN" train_jax_fttransformer.py
     --train-weights "$OUT_ADV_WEIGHTS"
@@ -306,10 +388,14 @@ if [[ "${RUN_TEACHER_ADVW}" == "1" ]]; then
     --zip-output
     --verbose "$FT_VERBOSE"
   )
+  if [[ "${SAVE_BEST_MODELS}" == "1" ]]; then
+    cmd_teacher_advw+=(--save-best-dir "$FT_SAVE_DIR/teacher_advw")
+  fi
   if [[ "${FT_MAX_TRAIN_ROWS}" != "0" && -n "${FT_MAX_TRAIN_ROWS}" ]]; then
     cmd_teacher_advw+=(--max-train-rows "$FT_MAX_TRAIN_ROWS")
   fi
   run "03_jax_teacher_advw" "${cmd_teacher_advw[@]}"
+  fi
 fi
 
 # 4a) Distillation (teacher-only)
@@ -344,6 +430,19 @@ fi
 
 # 4b) Distillation (hard+soft)
 if [[ "${RUN_STUDENT_B}" == "1" ]]; then
+  goto_run_student_b=0
+  if [[ "${SKIP_IF_EXISTS}" == "1" && -f "$OUT_SUB_STUDENT_B" ]]; then
+    if [[ "${SAVE_BEST_MODELS}" != "1" ]] || _ft_ckpts_complete "$FT_SAVE_DIR/student_b" "$FT_SEEDS_STUDENT" "$FOLDS"; then
+      echo "[skip] 04b_jax_student_hard_soft (output/checkpoints already exist)"
+    else
+      echo "[info] 04b_jax_student_hard_soft output exists but checkpoints incomplete; will run"
+      goto_run_student_b=1
+    fi
+  else
+    goto_run_student_b=1
+  fi
+
+  if [[ "${goto_run_student_b:-0}" == "1" ]]; then
   cmd_student_b=(
     "$PYTHON_BIN" jax_distill_student.py
     --teacher-oof "$OUT_OOF_TEACHER_ADVW"
@@ -366,10 +465,14 @@ if [[ "${RUN_STUDENT_B}" == "1" ]]; then
     --zip-output
     --verbose "$DIST_VERBOSE"
   )
+  if [[ "${SAVE_BEST_MODELS}" == "1" ]]; then
+    cmd_student_b+=(--save-best-dir "$FT_SAVE_DIR/student_b")
+  fi
   if [[ "${FT_MAX_TRAIN_ROWS}" != "0" && -n "${FT_MAX_TRAIN_ROWS}" ]]; then
     cmd_student_b+=(--max-train-rows "$FT_MAX_TRAIN_ROWS")
   fi
   run "04b_jax_student_hard_soft" "${cmd_student_b[@]}"
+  fi
 fi
 
 # 5) Logit-space blend
@@ -408,18 +511,36 @@ fi
 
 # 7) From-scratch JAX/Flax model with adv-weights + dist features + monotonic penalty
 if [[ "${RUN_SCRATCH_ADV}" == "1" ]]; then
+  goto_run_scratch=0
+  if [[ "${SKIP_IF_EXISTS}" == "1" && -f "$OUT_SUB_SCRATCH" ]]; then
+    if [[ "${SAVE_BEST_MODELS}" != "1" ]] || _scratch_ckpts_complete "$SCRATCH_SAVE_DIR" "$SCRATCH_SEED" "$SCRATCH_FOLDS"; then
+      echo "[skip] 07_jax_scratch_adv_dist_mono (output/checkpoints already exist)"
+    else
+      echo "[info] 07_jax_scratch_adv_dist_mono output exists but checkpoints incomplete; will run"
+      goto_run_scratch=1
+    fi
+  else
+    goto_run_scratch=1
+  fi
+
+  if [[ "${goto_run_scratch:-0}" == "1" ]]; then
   cmd_scratch=(
     "$PYTHON_BIN" -m jax_scratch_adv.run
     --train "$TRAIN_CSV"
     --test "$TEST_CSV"
     --out "$OUT_SUB_SCRATCH"
     --folds "$SCRATCH_FOLDS"
+    --seed "$SCRATCH_SEED"
     --epochs "$SCRATCH_EPOCHS"
     --batch-size "$SCRATCH_BATCH_SIZE"
     --norm-kind "$SCRATCH_NORM_KIND"
     --patience "$SCRATCH_PATIENCE"
     --eval-every "$SCRATCH_EVAL_EVERY"
   )
+
+  if [[ "${SAVE_BEST_MODELS}" == "1" ]]; then
+    cmd_scratch+=(--save-best-dir "$SCRATCH_SAVE_DIR" --save-metric "$SCRATCH_SAVE_METRIC")
+  fi
 
   if [[ "${SCRATCH_USE_ADV_WEIGHTS}" == "1" ]]; then
     cmd_scratch+=(
@@ -453,6 +574,7 @@ if [[ "${RUN_SCRATCH_ADV}" == "1" ]]; then
   fi
 
   run "07_jax_scratch_adv_dist_mono" "${cmd_scratch[@]}"
+  fi
 fi
 
 echo "All done. Key outputs:"

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import log_loss, roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 
 import jax
@@ -15,6 +16,7 @@ import jax.numpy as jnp
 import optax
 import flax.linen as nn
 from flax.training import train_state
+from flax import serialization
 
 from .data import (
     fit_encoders,
@@ -216,9 +218,105 @@ def main() -> None:
 
     p.add_argument("--smoke", action="store_true")
 
+    p.add_argument(
+        "--save-best-dir",
+        type=str,
+        default="",
+        help="Optional directory to save best per-fold params (Flax msgpack) whenever validation metric improves.",
+    )
+    p.add_argument(
+        "--save-metric",
+        type=str,
+        default="auc",
+        choices=["auc", "logloss"],
+        help="Which validation metric to use for selecting/saving the best checkpoint.",
+    )
+
     args = p.parse_args()
 
     rng = np.random.default_rng(args.seed)
+
+    save_best_dir = Path(str(args.save_best_dir)) if str(args.save_best_dir).strip() else None
+    save_metric = str(args.save_metric).strip().lower()
+
+    def _try_load_best_params(*, fold: int, target_params: dict) -> tuple[dict | None, float | None]:
+        if save_best_dir is None:
+            return None, None
+        stem = f"scratch_seed{int(args.seed)}_fold{int(fold)}"
+        params_path = save_best_dir / f"{stem}.msgpack"
+        meta_path = save_best_dir / f"{stem}.json"
+        if not params_path.exists():
+            return None, None
+        try:
+            loaded = serialization.from_bytes(target_params, params_path.read_bytes())
+        except Exception as e:
+            print(f"[warn] failed to load checkpoint {params_path}: {e}")
+            return None, None
+
+        best_val = None
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                if isinstance(meta, dict) and "best_metric" in meta:
+                    best_val = float(meta["best_metric"])
+            except Exception:
+                best_val = None
+
+        msg = f"[ckpt] loaded {params_path}"
+        if best_val is not None:
+            msg += f" (best_{save_metric}={best_val:.6f})"
+        print(msg)
+        return loaded, best_val
+
+    def _save_best_params(*, fold: int, params: dict, best_metric: float) -> None:
+        if save_best_dir is None:
+            return
+        save_best_dir.mkdir(parents=True, exist_ok=True)
+        stem = f"scratch_seed{int(args.seed)}_fold{int(fold)}"
+        params_path = save_best_dir / f"{stem}.msgpack"
+        meta_path = save_best_dir / f"{stem}.json"
+
+        params_path.write_bytes(serialization.to_bytes(params))
+        meta = {
+            "seed": int(args.seed),
+            "fold": int(fold),
+            "save_metric": save_metric,
+            "best_metric": float(best_metric),
+            "train": str(args.train),
+            "test": str(args.test),
+            "out": str(args.out),
+            "folds": int(args.folds),
+            "epochs": int(args.epochs),
+            "batch_size": int(args.batch_size),
+            "lr": float(args.lr),
+            "weight_decay": float(args.weight_decay),
+            "width": int(args.width),
+            "blocks": int(args.blocks),
+            "dropout": float(args.dropout),
+            "embed_dim": int(args.embed_dim),
+            "patience": int(args.patience),
+            "eval_every": int(args.eval_every),
+            "use_adv_weights": bool(args.use_adv_weights),
+            "adv_kind": str(args.adv_kind),
+            "adv_epochs": int(args.adv_epochs),
+            "adv_max_rows": int(args.adv_max_rows),
+            "adv_clip_min": float(args.adv_clip_min),
+            "adv_clip_max": float(args.adv_clip_max),
+            "norm_kind": str(args.norm_kind),
+            "use_mono": bool(args.use_mono),
+            "mono": str(args.mono),
+            "mono_lambda": float(args.mono_lambda),
+            "mono_delta": float(args.mono_delta),
+            "mono_k": int(args.mono_k),
+            "add_dist_features": bool(args.add_dist_features),
+            "dist_bins": int(args.dist_bins),
+            "dist_alpha": float(args.dist_alpha),
+            "dist_quantile_max_rows": int(args.dist_quantile_max_rows),
+            "dist_per_feature_llr": bool(args.dist_per_feature_llr),
+            "dist_nb_logit": bool(args.dist_nb_logit),
+            "dist_shift": bool(args.dist_shift),
+        }
+        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
 
     train_df, test_df = load_dataframes(args.train, args.test)
     target_col, id_col = infer_target_and_id(train_df)
@@ -473,7 +571,15 @@ def main() -> None:
             state = state.replace(dropout_rng=new_dropout_rng)
             return state, loss
 
-        best_auc = -1.0
+        # Resume from previous best checkpoint (if present).
+        loaded_params, loaded_best = _try_load_best_params(fold=fold, target_params=state.params)
+        if loaded_params is not None:
+            state = state.replace(params=loaded_params)
+
+        if save_metric == "auc":
+            best_metric = (-1.0 if loaded_best is None else float(loaded_best))
+        else:
+            best_metric = (float("inf") if loaded_best is None else float(loaded_best))
         best_params = None
         bad = 0
         step = 0
@@ -507,11 +613,18 @@ def main() -> None:
                         batch_size=args.batch_size,
                     )
                     val_prob = 1.0 / (1.0 + np.exp(-val_logits))
-                    auc = float(roc_auc_score(yv, val_prob))
 
-                    if auc > best_auc + 1e-5:
-                        best_auc = auc
+                    if save_metric == "auc":
+                        metric = float(roc_auc_score(yv, val_prob))
+                        improved = metric > best_metric + 1e-5
+                    else:
+                        metric = float(log_loss(yv, np.clip(val_prob, 1e-6, 1 - 1e-6)))
+                        improved = metric < best_metric - 1e-6
+
+                    if improved:
+                        best_metric = metric
                         best_params = jax.tree_util.tree_map(lambda x: x, state.params)
+                        _save_best_params(fold=fold, params=best_params, best_metric=best_metric)
                         bad = 0
                     else:
                         bad += 1
@@ -536,7 +649,11 @@ def main() -> None:
         test_preds.append(1.0 / (1.0 + np.exp(-test_logits)))
 
         fold_auc = float(roc_auc_score(yv, oof[va]))
-        print(f"fold={fold} auc={fold_auc:.6f} best_auc={best_auc:.6f}")
+        if save_metric == "auc":
+            print(f"fold={fold} auc={fold_auc:.6f} best_auc={best_metric:.6f}")
+        else:
+            fold_ll = float(log_loss(yv, np.clip(oof[va], 1e-6, 1 - 1e-6)))
+            print(f"fold={fold} auc={fold_auc:.6f} best_val_logloss={best_metric:.6f} fold_logloss={fold_ll:.6f}")
 
     full_auc = float(roc_auc_score(y, oof))
     print(f"OOF AUC: {full_auc:.6f}")

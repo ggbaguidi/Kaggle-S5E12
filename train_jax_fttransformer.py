@@ -25,6 +25,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 import zipfile
+import json
 
 import numpy as np
 import pandas as pd
@@ -157,6 +158,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--label-smoothing", type=float, default=0.0)
 
     p.add_argument("--zip-output", action="store_true")
+    p.add_argument(
+        "--save-best-dir",
+        type=Path,
+        default=None,
+        help="Optional directory to save best per-fold params (Flax msgpack) whenever val logloss improves.",
+    )
     p.add_argument("--verbose", type=int, default=1)
 
     args = p.parse_args(argv)
@@ -167,10 +174,87 @@ def main(argv: list[str] | None = None) -> int:
     import optax
     from flax import linen as nn
     from flax.training import train_state
+    from flax import serialization
 
     seeds = [int(s.strip()) for s in str(args.seeds).split(",") if s.strip()]
     if not seeds:
         raise ValueError("--seeds is empty")
+
+    save_best_dir: Path | None = Path(args.save_best_dir) if args.save_best_dir is not None else None
+
+    def _save_best_params(*, seed: int, fold: int, params: dict, best_val_logloss: float) -> None:
+        if save_best_dir is None:
+            return
+        save_best_dir.mkdir(parents=True, exist_ok=True)
+
+        # Flax serialization is a msgpack byte payload.
+        params_bytes = serialization.to_bytes(params)
+        stem = f"ftt_seed{seed}_fold{fold}"
+        params_path = save_best_dir / f"{stem}.msgpack"
+        meta_path = save_best_dir / f"{stem}.json"
+
+        params_path.write_bytes(params_bytes)
+        meta = {
+            "seed": int(seed),
+            "fold": int(fold),
+            "best_val_logloss": float(best_val_logloss),
+            "train": str(args.train),
+            "test": str(args.test),
+            "folds": int(args.folds),
+            "seeds": str(args.seeds),
+            "norm": str(args.norm),
+            "d_model": int(args.d_model),
+            "n_heads": int(args.n_heads),
+            "n_layers": int(args.n_layers),
+            "ff_mult": int(args.ff_mult),
+            "dropout": float(args.dropout),
+            "batch_size": int(args.batch_size),
+            "epochs": int(args.epochs),
+            "lr": float(args.lr),
+            "weight_decay": float(args.weight_decay),
+            "early_stop": int(args.early_stop),
+            "max_categories": int(args.max_categories),
+            "max_train_rows": int(args.max_train_rows),
+            "train_weights": str(args.train_weights) if args.train_weights is not None else None,
+            "teacher_oof": str(args.teacher_oof) if args.teacher_oof is not None else None,
+            "soft_alpha": float(args.soft_alpha),
+            "label_smoothing": float(args.label_smoothing),
+        }
+        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+    def _try_load_best_params(*, seed: int, fold: int, target_params: dict) -> tuple[dict | None, float | None]:
+        """Return (params, best_val_logloss) if a checkpoint exists; else (None, None)."""
+        if save_best_dir is None:
+            return None, None
+        stem = f"ftt_seed{seed}_fold{fold}"
+        params_path = save_best_dir / f"{stem}.msgpack"
+        meta_path = save_best_dir / f"{stem}.json"
+        if not params_path.exists():
+            return None, None
+
+        try:
+            loaded = serialization.from_bytes(target_params, params_path.read_bytes())
+        except Exception as e:
+            if args.verbose:
+                print(f"[warn] failed to load checkpoint {params_path}: {e}", flush=True)
+            return None, None
+
+        best_ll = None
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                if isinstance(meta, dict) and "best_val_logloss" in meta:
+                    best_ll = float(meta["best_val_logloss"])
+            except Exception:
+                best_ll = None
+
+        if args.verbose:
+            msg = f"[ckpt] loaded {params_path}"
+            if best_ll is not None:
+                msg += f" (best_val_logloss={best_ll:.6f})"
+            print(msg, flush=True)
+
+        return loaded, best_ll
 
     train_df = pd.read_csv(args.train)
     test_df = pd.read_csv(args.test)
@@ -425,7 +509,12 @@ def main(argv: list[str] | None = None) -> int:
 
             state = create_state(jax.random.fold_in(key, f))
 
-            best_loss = float("inf")
+            # Resume from previous best checkpoint (if present).
+            loaded_params, loaded_best = _try_load_best_params(seed=seed, fold=f, target_params=state.params)
+            if loaded_params is not None:
+                state = state.replace(params=loaded_params)
+
+            best_loss = float("inf") if loaded_best is None else float(loaded_best)
             best_params = state.params
             bad = 0
 
@@ -467,6 +556,7 @@ def main(argv: list[str] | None = None) -> int:
                 if ll + 1e-6 < best_loss:
                     best_loss = ll
                     best_params = state.params
+                    _save_best_params(seed=seed, fold=f, params=best_params, best_val_logloss=best_loss)
                     bad = 0
                 else:
                     bad += 1
