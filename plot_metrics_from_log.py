@@ -47,7 +47,11 @@ def parse_lines(lines: Iterable[str]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=["seed", "fold", "epoch", "metric", "value"])
 
-    df = pd.DataFrame(rows).sort_values(["metric", "seed", "fold", "epoch"]).reset_index(drop=True)
+    df = (
+        pd.DataFrame(rows)
+        .sort_values(["metric", "seed", "fold", "epoch"])
+        .reset_index(drop=True)
+    )
     return df
 
 
@@ -62,7 +66,9 @@ def metric_direction(metric: str) -> str:
     return "min"
 
 
-def plot_metric(df_metric: pd.DataFrame, *, metric: str, outpath: Path, title_prefix: str = "") -> None:
+def plot_metric(
+    df_metric: pd.DataFrame, *, metric: str, outpath: Path, title_prefix: str = ""
+) -> None:
     if df_metric.empty:
         return
 
@@ -70,7 +76,14 @@ def plot_metric(df_metric: pd.DataFrame, *, metric: str, outpath: Path, title_pr
 
     # one line per (seed, fold)
     for (seed, fold), g in df_metric.groupby(["seed", "fold"], sort=True):
-        plt.plot(g["epoch"], g["value"], marker="o", markersize=2.5, linewidth=1.2, label=f"seed={seed} fold={fold}")
+        plt.plot(
+            g["epoch"],
+            g["value"],
+            marker="o",
+            markersize=2.5,
+            linewidth=1.2,
+            label=f"seed={seed} fold={fold}",
+        )
 
     direction = metric_direction(metric)
     if direction == "min":
@@ -79,7 +92,9 @@ def plot_metric(df_metric: pd.DataFrame, *, metric: str, outpath: Path, title_pr
         best_idx = df_metric["value"].idxmax()
 
     best_epoch = int(df_metric.loc[best_idx, "epoch"]) if best_idx is not None else None
-    best_value = float(df_metric.loc[best_idx, "value"]) if best_idx is not None else None
+    best_value = (
+        float(df_metric.loc[best_idx, "value"]) if best_idx is not None else None
+    )
 
     ttl = f"{title_prefix}{metric}"
     if best_epoch is not None and best_value is not None:
@@ -117,7 +132,9 @@ def main() -> int:
 
     outdir = args.outdir if args.outdir is not None else (log_path.parent / "plots")
 
-    df = parse_lines(log_path.read_text(encoding="utf-8", errors="replace").splitlines())
+    df = parse_lines(
+        log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    )
     if df.empty:
         raise SystemExit(
             "No matching metric lines found. Expected lines like: '[seed=42 fold=0] epoch=1 val_logloss=0.603455'"

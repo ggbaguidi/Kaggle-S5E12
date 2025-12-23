@@ -36,7 +36,9 @@ class Schema:
     categorical_cols: list[str]
 
 
-def _infer_schema(train_path: Path, id_col: str | None, target_col: str | None) -> Schema:
+def _infer_schema(
+    train_path: Path, id_col: str | None, target_col: str | None
+) -> Schema:
     sample = pd.read_csv(train_path, nrows=500)
 
     inferred_id = id_col or ("id" if "id" in sample.columns else sample.columns[0])
@@ -48,7 +50,9 @@ def _infer_schema(train_path: Path, id_col: str | None, target_col: str | None) 
             "Could not infer target column. Pass --target-col (e.g., diagnosed_diabetes)."
         )
 
-    feature_cols = [c for c in sample.columns if c not in (inferred_id, inferred_target)]
+    feature_cols = [
+        c for c in sample.columns if c not in (inferred_id, inferred_target)
+    ]
 
     numeric_cols: list[str] = []
     categorical_cols: list[str] = []
@@ -68,7 +72,9 @@ def _infer_schema(train_path: Path, id_col: str | None, target_col: str | None) 
     )
 
 
-def _read_csv_in_chunks(path: Path, chunk_size: int, usecols: list[str] | None = None) -> Iterator[pd.DataFrame]:
+def _read_csv_in_chunks(
+    path: Path, chunk_size: int, usecols: list[str] | None = None
+) -> Iterator[pd.DataFrame]:
     yield from pd.read_csv(path, chunksize=chunk_size, usecols=usecols)
 
 
@@ -93,7 +99,9 @@ def _stable_val_mask(ids: np.ndarray, val_frac: float, val_seed: int) -> np.ndar
     return buckets < int(val_frac * 1_000_000)
 
 
-def _categorical_text_frame(df: pd.DataFrame, categorical_cols: list[str]) -> np.ndarray:
+def _categorical_text_frame(
+    df: pd.DataFrame, categorical_cols: list[str]
+) -> np.ndarray:
     """Return an array of strings, one per row, containing 'col=value' tokens."""
     if not categorical_cols:
         return np.asarray([""] * len(df), dtype=object)
@@ -127,7 +135,11 @@ def _build_features(
     x_cat_txt = _categorical_text_frame(df, schema.categorical_cols)
     x_cat = vectorizer.transform(x_cat_txt)  # sparse
 
-    x_num_sp = sparse.csr_matrix(x_num) if x_num.shape[1] > 0 else sparse.csr_matrix((len(df), 0))
+    x_num_sp = (
+        sparse.csr_matrix(x_num)
+        if x_num.shape[1] > 0
+        else sparse.csr_matrix((len(df), 0))
+    )
     return sparse.hstack([x_num_sp, x_cat], format="csr")
 
 
@@ -145,9 +157,16 @@ def _stream_fit_scaler(
         return scaler
 
     usecols = [schema.id_col, *schema.numeric_cols]
-    for chunk in _read_csv_in_chunks(train_path, chunk_size=chunk_size, usecols=usecols):
+    for chunk in _read_csv_in_chunks(
+        train_path, chunk_size=chunk_size, usecols=usecols
+    ):
         if train_only and val_frac > 0:
-            ids = pd.to_numeric(chunk[schema.id_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+            ids = (
+                pd.to_numeric(chunk[schema.id_col], errors="coerce")
+                .fillna(0)
+                .astype(np.int64)
+                .to_numpy()
+            )
             val_mask = _stable_val_mask(ids, val_frac=val_frac, val_seed=val_seed)
             if val_mask.all():
                 continue
@@ -178,16 +197,28 @@ def _stream_class_counts(
     seen = 0
 
     usecols = [schema.id_col, schema.target_col]
-    for chunk in _read_csv_in_chunks(train_path, chunk_size=chunk_size, usecols=usecols):
+    for chunk in _read_csv_in_chunks(
+        train_path, chunk_size=chunk_size, usecols=usecols
+    ):
         if val_frac > 0:
-            ids = pd.to_numeric(chunk[schema.id_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+            ids = (
+                pd.to_numeric(chunk[schema.id_col], errors="coerce")
+                .fillna(0)
+                .astype(np.int64)
+                .to_numpy()
+            )
             val_mask = _stable_val_mask(ids, val_frac=val_frac, val_seed=val_seed)
             chunk = chunk.loc[~val_mask] if train_only else chunk.loc[val_mask]
 
         if len(chunk) == 0:
             continue
 
-        y = pd.to_numeric(chunk[schema.target_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+        y = (
+            pd.to_numeric(chunk[schema.target_col], errors="coerce")
+            .fillna(0)
+            .astype(np.int64)
+            .to_numpy()
+        )
         # Ensure binary 0/1
         y = np.where(y > 0, 1, 0).astype(np.int64, copy=False)
         binc = np.bincount(y, minlength=2)
@@ -252,7 +283,12 @@ def _stream_train_sgd(
             usecols=[schema.id_col, schema.target_col, *schema.feature_cols],
         ):
             if train_only and val_frac > 0:
-                ids = pd.to_numeric(chunk[schema.id_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+                ids = (
+                    pd.to_numeric(chunk[schema.id_col], errors="coerce")
+                    .fillna(0)
+                    .astype(np.int64)
+                    .to_numpy()
+                )
                 val_mask = _stable_val_mask(ids, val_frac=val_frac, val_seed=val_seed)
                 if val_mask.all():
                     continue
@@ -268,7 +304,9 @@ def _stream_train_sgd(
                 .to_numpy()
             )
             y = np.where(y > 0, 1, 0).astype(np.int64, copy=False)
-            x = _build_features(chunk, schema=schema, vectorizer=vectorizer, scaler=scaler)
+            x = _build_features(
+                chunk, schema=schema, vectorizer=vectorizer, scaler=scaler
+            )
 
             sw = None
             if class_counts is not None:
@@ -305,7 +343,12 @@ def _stream_val_logloss(
         chunk_size=chunk_size,
         usecols=[schema.id_col, schema.target_col, *schema.feature_cols],
     ):
-        ids = pd.to_numeric(chunk[schema.id_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+        ids = (
+            pd.to_numeric(chunk[schema.id_col], errors="coerce")
+            .fillna(0)
+            .astype(np.int64)
+            .to_numpy()
+        )
         val_mask = _stable_val_mask(ids, val_frac=val_frac, val_seed=val_seed)
         if not val_mask.any():
             continue
@@ -372,7 +415,10 @@ def train_and_predict(
 
     if tune:
         if verbose:
-            print(f"[tune] val_frac={val_frac} val_seed={val_seed} tune_passes={tune_passes}", flush=True)
+            print(
+                f"[tune] val_frac={val_frac} val_seed={val_seed} tune_passes={tune_passes}",
+                flush=True,
+            )
         # Fit scaler on train-only portion (avoid leakage into validation).
         scaler_tv = _stream_fit_scaler(
             train_path,
@@ -391,13 +437,24 @@ def train_and_predict(
             val_frac=val_frac,
             val_seed=val_seed,
             train_only=True,
-            max_rows=(int(tune_max_train_rows) if tune_max_train_rows and tune_max_train_rows > 0 else None),
+            max_rows=(
+                int(tune_max_train_rows)
+                if tune_max_train_rows and tune_max_train_rows > 0
+                else None
+            ),
         )
 
         grid: list[dict[str, Any]] = []
         for alpha in (1e-6, 3e-6, 1e-5, 3e-5, 1e-4):
             for cw in (None, "balanced"):
-                grid.append({"penalty": "l2", "alpha": alpha, "learning_rate": "optimal", "class_weight": cw})
+                grid.append(
+                    {
+                        "penalty": "l2",
+                        "alpha": alpha,
+                        "learning_rate": "optimal",
+                        "class_weight": cw,
+                    }
+                )
         for alpha in (1e-6, 1e-5, 3e-5):
             for l1_ratio in (0.15, 0.5):
                 for cw in (None, "balanced"):
@@ -411,8 +468,24 @@ def train_and_predict(
                         }
                     )
         # A couple of constant-LR candidates (sometimes helps with convergence)
-        grid.append({"penalty": "l2", "alpha": 1e-5, "learning_rate": "constant", "eta0": 0.02, "class_weight": None})
-        grid.append({"penalty": "l2", "alpha": 1e-5, "learning_rate": "constant", "eta0": 0.05, "class_weight": "balanced"})
+        grid.append(
+            {
+                "penalty": "l2",
+                "alpha": 1e-5,
+                "learning_rate": "constant",
+                "eta0": 0.02,
+                "class_weight": None,
+            }
+        )
+        grid.append(
+            {
+                "penalty": "l2",
+                "alpha": 1e-5,
+                "learning_rate": "constant",
+                "eta0": 0.05,
+                "class_weight": "balanced",
+            }
+        )
 
         if tune_limit and tune_limit > 0:
             grid = grid[: int(tune_limit)]
@@ -421,7 +494,11 @@ def train_and_predict(
         best_cfg: dict[str, Any] | None = None
         results: list[dict[str, Any]] = []
 
-        max_rows = int(tune_max_train_rows) if tune_max_train_rows and tune_max_train_rows > 0 else None
+        max_rows = (
+            int(tune_max_train_rows)
+            if tune_max_train_rows and tune_max_train_rows > 0
+            else None
+        )
         for i, cfg in enumerate(grid, start=1):
             m = _make_sgd_model(seed=seed, cfg=cfg)
 
@@ -459,17 +536,31 @@ def train_and_predict(
                 best_cfg = cfg
 
             if verbose:
-                print(f"[tune] {i:02d}/{len(grid)} val_logloss={loss:.6f} cfg={cfg}", flush=True)
+                print(
+                    f"[tune] {i:02d}/{len(grid)} val_logloss={loss:.6f} cfg={cfg}",
+                    flush=True,
+                )
 
         if best_cfg is None:
             raise RuntimeError("Tuning failed: no configs evaluated")
 
         chosen_cfg = dict(best_cfg)
         if verbose:
-            print(f"[tune] best_val_logloss={best_loss:.6f} best_cfg={chosen_cfg}", flush=True)
+            print(
+                f"[tune] best_val_logloss={best_loss:.6f} best_cfg={chosen_cfg}",
+                flush=True,
+            )
         if tune_out is not None:
             tune_out.parent.mkdir(parents=True, exist_ok=True)
-            tune_out.write_text(json.dumps({"best": {"val_logloss": best_loss, **chosen_cfg}, "trials": results}, indent=2))
+            tune_out.write_text(
+                json.dumps(
+                    {
+                        "best": {"val_logloss": best_loss, **chosen_cfg},
+                        "trials": results,
+                    },
+                    indent=2,
+                )
+            )
             if verbose:
                 print(f"[tune] wrote {tune_out}", flush=True)
 
@@ -480,10 +571,15 @@ def train_and_predict(
     cw_final = chosen_cfg.get("class_weight", None)
     counts_full = None
     if cw_final == "balanced":
-        counts_full = _stream_class_counts(train_path=train_path, schema=schema, chunk_size=chunk_size)
+        counts_full = _stream_class_counts(
+            train_path=train_path, schema=schema, chunk_size=chunk_size
+        )
 
     if verbose:
-        print(f"[fit] passes={passes} hash_dim={n_hash_features} cfg={chosen_cfg}", flush=True)
+        print(
+            f"[fit] passes={passes} hash_dim={n_hash_features} cfg={chosen_cfg}",
+            flush=True,
+        )
 
     _stream_train_sgd(
         model=model,
@@ -499,13 +595,21 @@ def train_and_predict(
     # Stream predictions over test
     ids: list[np.ndarray] = []
     probs: list[np.ndarray] = []
-    for chunk in _read_csv_in_chunks(test_path, chunk_size=chunk_size, usecols=[schema.id_col, *schema.feature_cols]):
+    for chunk in _read_csv_in_chunks(
+        test_path, chunk_size=chunk_size, usecols=[schema.id_col, *schema.feature_cols]
+    ):
         x = _build_features(chunk, schema=schema, vectorizer=vectorizer, scaler=scaler)
         p = model.predict_proba(x)[:, 1].astype(np.float64)
         probs.append(p)
-        ids.append(pd.to_numeric(chunk[schema.id_col], errors="coerce").astype(np.int64).to_numpy())
+        ids.append(
+            pd.to_numeric(chunk[schema.id_col], errors="coerce")
+            .astype(np.int64)
+            .to_numpy()
+        )
 
-    sub = pd.DataFrame({schema.id_col: np.concatenate(ids), schema.target_col: np.concatenate(probs)})
+    sub = pd.DataFrame(
+        {schema.id_col: np.concatenate(ids), schema.target_col: np.concatenate(probs)}
+    )
     # Match Kaggle sample submission naming
     if schema.id_col != "id":
         sub = sub.rename(columns={schema.id_col: "id"})
@@ -518,15 +622,17 @@ def train_and_predict(
         print(f"[done] wrote {out_path} rows={len(sub)}", flush=True)
 
     if zip_output:
-        zip_path = out_path.with_suffix('.zip')
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zip_path = out_path.with_suffix(".zip")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.write(out_path, out_path.name)
         if verbose:
             print(f"[done] zipped to {zip_path}", flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Streaming CPU-only trainer for diabetes probability prediction")
+    p = argparse.ArgumentParser(
+        description="Streaming CPU-only trainer for diabetes probability prediction"
+    )
     p.add_argument("--train", type=Path, default=Path("data/train.csv"))
     p.add_argument("--test", type=Path, default=Path("data/test.csv"))
     p.add_argument("--out", type=Path, default=Path("submission.csv"))
@@ -539,12 +645,26 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--val-frac", type=float, default=0.1)
     p.add_argument("--val-seed", type=int, default=42)
     p.add_argument("--tune", action="store_true")
-    p.add_argument("--tune-limit", type=int, default=0, help="Limit number of configs evaluated (0 = all)")
+    p.add_argument(
+        "--tune-limit",
+        type=int,
+        default=0,
+        help="Limit number of configs evaluated (0 = all)",
+    )
     p.add_argument("--tune-passes", type=int, default=1)
-    p.add_argument("--tune-max-train-rows", type=int, default=0, help="Cap rows used for tuning (0 = no cap)")
+    p.add_argument(
+        "--tune-max-train-rows",
+        type=int,
+        default=0,
+        help="Cap rows used for tuning (0 = no cap)",
+    )
     p.add_argument("--tune-out", type=Path, default=Path("tuning_results.json"))
     p.add_argument("--verbose", type=int, default=1)
-    p.add_argument("--zip-output", action="store_true", help="Zip the output CSV file after writing")
+    p.add_argument(
+        "--zip-output",
+        action="store_true",
+        help="Zip the output CSV file after writing",
+    )
     args = p.parse_args(argv)
 
     train_and_predict(

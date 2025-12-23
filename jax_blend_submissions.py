@@ -47,7 +47,9 @@ def main(argv: list[str] | None = None) -> int:
         if not np.array_equal(ids, df["id"].to_numpy()):
             raise ValueError(f"IDs do not match between inputs[0] and inputs[{i-1}]")
 
-    preds = np.vstack([df["diagnosed_diabetes"].to_numpy(dtype=np.float64) for df in frames])  # (m, n)
+    preds = np.vstack(
+        [df["diagnosed_diabetes"].to_numpy(dtype=np.float64) for df in frames]
+    )  # (m, n)
 
     if args.weights is None:
         w = np.ones(preds.shape[0], dtype=np.float64) / preds.shape[0]
@@ -81,7 +83,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.zip_output:
         zip_path = args.out.with_suffix(".zip")
-        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(
+            zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as zf:
             zf.write(args.out, arcname=args.out.name)
         if args.verbose:
             print(f"[blend-jax] wrote {zip_path}", flush=True)

@@ -57,7 +57,9 @@ def blend(
         if not np.array_equal(ids, df["id"].to_numpy()):
             raise ValueError(f"IDs do not match between inputs[0] and inputs[{i-1}]")
 
-    preds = np.vstack([df["diagnosed_diabetes"].to_numpy(dtype=np.float64) for df in frames])
+    preds = np.vstack(
+        [df["diagnosed_diabetes"].to_numpy(dtype=np.float64) for df in frames]
+    )
 
     if weights is None:
         w = np.ones(preds.shape[0], dtype=np.float64) / preds.shape[0]
@@ -91,7 +93,9 @@ def blend(
 
     if zip_output:
         zip_path = out.with_suffix(".zip")
-        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(
+            zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as zf:
             zf.write(out, arcname=out.name)
         if verbose:
             print(f"[blend] wrote {zip_path}", flush=True)
@@ -102,7 +106,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--inputs", nargs="+", type=Path, required=True)
     p.add_argument("--out", type=Path, default=Path("submission_blend.csv"))
     p.add_argument("--weights", nargs="+", type=float, default=None)
-    p.add_argument("--mode", type=str, default="prob", help="Blend mode: prob (average probabilities) or logit (average logits)")
+    p.add_argument(
+        "--mode",
+        type=str,
+        default="prob",
+        help="Blend mode: prob (average probabilities) or logit (average logits)",
+    )
     p.add_argument("--zip-output", action="store_true")
     p.add_argument("--verbose", type=int, default=1)
     args = p.parse_args(argv)

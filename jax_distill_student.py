@@ -17,8 +17,15 @@ from pathlib import Path
 def main(argv: list[str] | None = None) -> int:
     from train_jax_fttransformer import main as train_main
 
-    p = argparse.ArgumentParser(description="JAX distillation student (wrapper around train_jax_fttransformer.py)")
-    p.add_argument("--teacher-oof", type=Path, required=True, help="Teacher OOF CSV (id,y,oof_pred)")
+    p = argparse.ArgumentParser(
+        description="JAX distillation student (wrapper around train_jax_fttransformer.py)"
+    )
+    p.add_argument(
+        "--teacher-oof",
+        type=Path,
+        required=True,
+        help="Teacher OOF CSV (id,y,oof_pred)",
+    )
     p.add_argument("--soft-alpha", type=float, default=0.7)
     p.add_argument("--label-smoothing", type=float, default=0.02)
 

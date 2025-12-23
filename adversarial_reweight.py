@@ -21,9 +21,13 @@ import numpy as np
 import pandas as pd
 
 
-def _infer_cols(train: pd.DataFrame, id_col: str | None, target_col: str | None) -> tuple[str, str, list[str]]:
+def _infer_cols(
+    train: pd.DataFrame, id_col: str | None, target_col: str | None
+) -> tuple[str, str, list[str]]:
     id_col = id_col or ("id" if "id" in train.columns else train.columns[0])
-    target_col = target_col or ("diagnosed_diabetes" if "diagnosed_diabetes" in train.columns else None)
+    target_col = target_col or (
+        "diagnosed_diabetes" if "diagnosed_diabetes" in train.columns else None
+    )
     if target_col is None or target_col not in train.columns:
         raise ValueError("Could not infer target column; pass --target-col")
     features = [c for c in train.columns if c not in (id_col, target_col)]
@@ -96,13 +100,17 @@ def adversarial_weights(
     test = pd.read_csv(test_path)
 
     id_col, _target, features = _infer_cols(train, id_col=id_col, target_col=target_col)
-    train, test, categorical_cols = _prep_frames(train, test, features, max_categories=max_categories)
+    train, test, categorical_cols = _prep_frames(
+        train, test, features, max_categories=max_categories
+    )
 
     x_train = train[features]
     x_test = test[features]
 
     x_all = pd.concat([x_train, x_test], axis=0, ignore_index=True)
-    d_all = np.concatenate([np.zeros(len(x_train), dtype=np.int64), np.ones(len(x_test), dtype=np.int64)])
+    d_all = np.concatenate(
+        [np.zeros(len(x_train), dtype=np.int64), np.ones(len(x_test), dtype=np.int64)]
+    )
 
     params = {
         "objective": "binary",
@@ -120,12 +128,20 @@ def adversarial_weights(
         "seed": int(seed),
     }
 
-    skf = StratifiedKFold(n_splits=max(2, int(folds)), shuffle=True, random_state=int(seed))
+    skf = StratifiedKFold(
+        n_splits=max(2, int(folds)), shuffle=True, random_state=int(seed)
+    )
     oof = np.zeros(len(x_all), dtype=np.float64)
 
     if verbose:
-        print(f"[adv] train_rows={len(x_train)} test_rows={len(x_test)} features={len(features)} cats={len(categorical_cols)}", flush=True)
-        print(f"[adv] folds={folds} num_boost_round={num_boost_round} early_stopping={early_stopping_rounds}", flush=True)
+        print(
+            f"[adv] train_rows={len(x_train)} test_rows={len(x_test)} features={len(features)} cats={len(categorical_cols)}",
+            flush=True,
+        )
+        print(
+            f"[adv] folds={folds} num_boost_round={num_boost_round} early_stopping={early_stopping_rounds}",
+            flush=True,
+        )
 
     for fold, (tr_idx, va_idx) in enumerate(skf.split(x_all, d_all), start=1):
         dtrain = lgb.Dataset(
@@ -148,7 +164,9 @@ def adversarial_weights(
             num_boost_round=int(num_boost_round),
             valid_sets=[dvalid],
             valid_names=["val"],
-            callbacks=[lgb.early_stopping(int(early_stopping_rounds), verbose=bool(verbose))],
+            callbacks=[
+                lgb.early_stopping(int(early_stopping_rounds), verbose=bool(verbose))
+            ],
         )
 
         p = booster.predict(x_all.iloc[va_idx], num_iteration=booster.best_iteration)
@@ -164,7 +182,9 @@ def adversarial_weights(
 
     out = pd.DataFrame(
         {
-            "id": pd.to_numeric(train[id_col], errors="coerce").fillna(0).astype(np.int64),
+            "id": pd.to_numeric(train[id_col], errors="coerce")
+            .fillna(0)
+            .astype(np.int64),
             "weight": w.astype(np.float32),
         }
     )
@@ -172,23 +192,35 @@ def adversarial_weights(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(out_path, index=False)
     if verbose:
-        print(f"[done] wrote {out_path} rows={len(out)} weight_mean={float(np.mean(w)):.6f} min={float(np.min(w)):.6f} max={float(np.max(w)):.6f}", flush=True)
+        print(
+            f"[done] wrote {out_path} rows={len(out)} weight_mean={float(np.mean(w)):.6f} min={float(np.min(w)):.6f} max={float(np.max(w)):.6f}",
+            flush=True,
+        )
 
     if zip_output:
         zip_path = out_path.with_suffix(".zip")
-        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(
+            zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as zf:
             zf.write(out_path, arcname=out_path.name)
         if verbose:
             print(f"[done] wrote {zip_path}", flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Adversarial reweighting: train-vs-test importance weights")
+    p = argparse.ArgumentParser(
+        description="Adversarial reweighting: train-vs-test importance weights"
+    )
     p.add_argument("--train", type=Path, default=Path("data/train.csv"))
     p.add_argument("--test", type=Path, default=Path("data/test.csv"))
     p.add_argument("--out", type=Path, default=Path("sub/train_weights_adv.csv"))
     p.add_argument("--id-col", type=str, default=None)
-    p.add_argument("--target-col", type=str, default=None, help="Only used to infer feature columns")
+    p.add_argument(
+        "--target-col",
+        type=str,
+        default=None,
+        help="Only used to infer feature columns",
+    )
 
     p.add_argument("--folds", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
@@ -209,7 +241,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p.add_argument("--clip-min", type=float, default=0.1)
     p.add_argument("--clip-max", type=float, default=10.0)
-    p.add_argument("--no-normalize", action="store_true", help="Do not normalize weights to mean=1")
+    p.add_argument(
+        "--no-normalize", action="store_true", help="Do not normalize weights to mean=1"
+    )
 
     p.add_argument("--zip-output", action="store_true")
     p.add_argument("--verbose", type=int, default=1)

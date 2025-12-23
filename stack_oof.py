@@ -48,12 +48,19 @@ def _read_oof(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     need = {"id", "y", "oof_pred"}
     if set(df.columns) != need:
-        raise ValueError(f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})")
+        raise ValueError(
+            f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})"
+        )
     df = df.copy()
     df["id"] = pd.to_numeric(df["id"], errors="coerce").fillna(0).astype(np.int64)
     df["y"] = pd.to_numeric(df["y"], errors="coerce").fillna(0).astype(np.int64)
     df["y"] = np.where(df["y"].to_numpy() > 0, 1, 0)
-    df["oof_pred"] = pd.to_numeric(df["oof_pred"], errors="coerce").fillna(0.5).clip(0, 1).astype(np.float64)
+    df["oof_pred"] = (
+        pd.to_numeric(df["oof_pred"], errors="coerce")
+        .fillna(0.5)
+        .clip(0, 1)
+        .astype(np.float64)
+    )
     return df
 
 
@@ -61,21 +68,48 @@ def _read_sub(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     need = {"id", "diagnosed_diabetes"}
     if set(df.columns) != need:
-        raise ValueError(f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})")
+        raise ValueError(
+            f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})"
+        )
     df = df.copy()
     df["id"] = pd.to_numeric(df["id"], errors="coerce").fillna(0).astype(np.int64)
-    df["diagnosed_diabetes"] = pd.to_numeric(df["diagnosed_diabetes"], errors="coerce").fillna(0.5).clip(0, 1).astype(np.float64)
+    df["diagnosed_diabetes"] = (
+        pd.to_numeric(df["diagnosed_diabetes"], errors="coerce")
+        .fillna(0.5)
+        .clip(0, 1)
+        .astype(np.float64)
+    )
     return df
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Stacking with logistic regression on OOF predictions")
-    p.add_argument("--oof", nargs="+", type=Path, required=True, help="OOF CSVs (id,y,oof_pred)")
-    p.add_argument("--subs", nargs="+", type=Path, required=True, help="Test submissions (id,diagnosed_diabetes)")
+    p = argparse.ArgumentParser(
+        description="Stacking with logistic regression on OOF predictions"
+    )
+    p.add_argument(
+        "--oof", nargs="+", type=Path, required=True, help="OOF CSVs (id,y,oof_pred)"
+    )
+    p.add_argument(
+        "--subs",
+        nargs="+",
+        type=Path,
+        required=True,
+        help="Test submissions (id,diagnosed_diabetes)",
+    )
     p.add_argument("--out", type=Path, default=Path("sub/submission_stack.csv"))
 
-    p.add_argument("--features", type=str, default="logit", help="Feature set: prob|logit|prob,logit")
-    p.add_argument("--C", type=float, default=1.0, help="Inverse regularization for LogisticRegression")
+    p.add_argument(
+        "--features",
+        type=str,
+        default="logit",
+        help="Feature set: prob|logit|prob,logit",
+    )
+    p.add_argument(
+        "--C",
+        type=float,
+        default=1.0,
+        help="Inverse regularization for LogisticRegression",
+    )
     p.add_argument("--max-iter", type=int, default=200)
     p.add_argument("--zip-output", action="store_true")
     p.add_argument("--verbose", type=int, default=1)
@@ -83,7 +117,9 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     if len(args.oof) != len(args.subs):
-        raise ValueError("--oof and --subs must have the same number of files (aligned order)")
+        raise ValueError(
+            "--oof and --subs must have the same number of files (aligned order)"
+        )
 
     from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import log_loss, roc_auc_score
@@ -119,7 +155,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Shape: (n_models, n_rows)
     P_oof = np.vstack([df["oof_pred"].to_numpy(dtype=np.float64) for df in oofs]).T
-    P_test = np.vstack([df["diagnosed_diabetes"].to_numpy(dtype=np.float64) for df in subs]).T
+    P_test = np.vstack(
+        [df["diagnosed_diabetes"].to_numpy(dtype=np.float64) for df in subs]
+    ).T
 
     X = build_X(P_oof)
     X_test = build_X(P_test)
@@ -145,14 +183,22 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.verbose:
         coefs = clf.coef_.reshape(-1)
-        print(f"[stack] models={len(args.oof)} features={feat_set} C={float(args.C)}", flush=True)
+        print(
+            f"[stack] models={len(args.oof)} features={feat_set} C={float(args.C)}",
+            flush=True,
+        )
         print(f"[stack] OOF logloss={ll:.6f} auc={auc:.6f}", flush=True)
-        print(f"[stack] coef={np.array2string(coefs, precision=4, max_line_width=120)}", flush=True)
+        print(
+            f"[stack] coef={np.array2string(coefs, precision=4, max_line_width=120)}",
+            flush=True,
+        )
         print(f"[done] wrote {args.out} rows={len(out)}", flush=True)
 
     if args.zip_output:
         zip_path = args.out.with_suffix(".zip")
-        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(
+            zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as zf:
             zf.write(args.out, arcname=args.out.name)
         if args.verbose:
             print(f"[done] wrote {zip_path}", flush=True)

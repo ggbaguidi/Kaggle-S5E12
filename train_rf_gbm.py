@@ -26,9 +26,13 @@ import numpy as np
 import pandas as pd
 
 
-def _infer_cols(train: pd.DataFrame, id_col: str | None, target_col: str | None) -> tuple[str, str, list[str]]:
+def _infer_cols(
+    train: pd.DataFrame, id_col: str | None, target_col: str | None
+) -> tuple[str, str, list[str]]:
     id_col = id_col or ("id" if "id" in train.columns else train.columns[0])
-    target_col = target_col or ("diagnosed_diabetes" if "diagnosed_diabetes" in train.columns else None)
+    target_col = target_col or (
+        "diagnosed_diabetes" if "diagnosed_diabetes" in train.columns else None
+    )
     if target_col is None or target_col not in train.columns:
         raise ValueError("Could not infer target column; pass --target-col")
     features = [c for c in train.columns if c not in (id_col, target_col)]
@@ -39,10 +43,14 @@ def _read_train_weights(path: Path, train_ids: np.ndarray) -> np.ndarray:
     df = pd.read_csv(path)
     need = {"id", "weight"}
     if set(df.columns) != need:
-        raise ValueError(f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})")
+        raise ValueError(
+            f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})"
+        )
     df = df.copy()
     df["id"] = pd.to_numeric(df["id"], errors="coerce").fillna(0).astype(np.int64)
-    df["weight"] = pd.to_numeric(df["weight"], errors="coerce").fillna(1.0).astype(np.float32)
+    df["weight"] = (
+        pd.to_numeric(df["weight"], errors="coerce").fillna(1.0).astype(np.float32)
+    )
 
     w_map = dict(zip(df["id"].to_numpy(), df["weight"].to_numpy()))
     w = np.asarray([float(w_map.get(int(i), 1.0)) for i in train_ids], dtype=np.float32)
@@ -51,7 +59,9 @@ def _read_train_weights(path: Path, train_ids: np.ndarray) -> np.ndarray:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Train RandomForest or sklearn GBM on S5E12 (CPU)")
+    p = argparse.ArgumentParser(
+        description="Train RandomForest or sklearn GBM on S5E12 (CPU)"
+    )
 
     p.add_argument("--train", type=Path, default=Path("data/train.csv"))
     p.add_argument("--test", type=Path, default=Path("data/test.csv"))
@@ -68,7 +78,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p.add_argument("--max-train-rows", type=int, default=0)
 
-    p.add_argument("--train-weights", type=Path, default=None, help="CSV with columns id,weight")
+    p.add_argument(
+        "--train-weights", type=Path, default=None, help="CSV with columns id,weight"
+    )
 
     # RF params
     p.add_argument("--rf-n-estimators", type=int, default=600)
@@ -111,15 +123,34 @@ def main(argv: list[str] | None = None) -> int:
     train_df = pd.read_csv(args.train)
     test_df = pd.read_csv(args.test)
 
-    id_col, target_col, feature_cols = _infer_cols(train_df, args.id_col, args.target_col)
+    id_col, target_col, feature_cols = _infer_cols(
+        train_df, args.id_col, args.target_col
+    )
 
     if args.max_train_rows and args.max_train_rows > 0:
-        train_df = train_df.sample(n=min(int(args.max_train_rows), len(train_df)), random_state=int(seeds[0])).reset_index(drop=True)
+        train_df = train_df.sample(
+            n=min(int(args.max_train_rows), len(train_df)), random_state=int(seeds[0])
+        ).reset_index(drop=True)
 
-    train_ids = pd.to_numeric(train_df[id_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
-    test_ids = pd.to_numeric(test_df[id_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+    train_ids = (
+        pd.to_numeric(train_df[id_col], errors="coerce")
+        .fillna(0)
+        .astype(np.int64)
+        .to_numpy()
+    )
+    test_ids = (
+        pd.to_numeric(test_df[id_col], errors="coerce")
+        .fillna(0)
+        .astype(np.int64)
+        .to_numpy()
+    )
 
-    y = pd.to_numeric(train_df[target_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+    y = (
+        pd.to_numeric(train_df[target_col], errors="coerce")
+        .fillna(0)
+        .astype(np.int64)
+        .to_numpy()
+    )
     y = np.where(y > 0, 1, 0).astype(np.int64, copy=False)
 
     if args.train_weights is not None:
@@ -147,7 +178,15 @@ def main(argv: list[str] | None = None) -> int:
     categorical = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="most_frequent")),
-            ("enc", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1, encoded_missing_value=-1, dtype=np.int32)),
+            (
+                "enc",
+                OrdinalEncoder(
+                    handle_unknown="use_encoded_value",
+                    unknown_value=-1,
+                    encoded_missing_value=-1,
+                    dtype=np.int32,
+                ),
+            ),
         ]
     )
 
@@ -161,7 +200,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # Cast final matrix to float32 for less RAM.
-    cast32 = FunctionTransformer(lambda X: X.astype(np.float32, copy=False), feature_names_out="one-to-one")
+    cast32 = FunctionTransformer(
+        lambda X: X.astype(np.float32, copy=False), feature_names_out="one-to-one"
+    )
 
     def make_estimator(seed: int):
         if model_kind == "rf":
@@ -202,11 +243,15 @@ def main(argv: list[str] | None = None) -> int:
     test_ens = np.zeros(len(test_df), dtype=np.float64)
 
     for si, seed in enumerate(seeds, start=1):
-        skf = StratifiedKFold(n_splits=int(args.folds), shuffle=True, random_state=int(seed))
+        skf = StratifiedKFold(
+            n_splits=int(args.folds), shuffle=True, random_state=int(seed)
+        )
         oof = np.zeros(len(train_df), dtype=np.float64)
         test_accum = np.zeros(len(test_df), dtype=np.float64)
 
-        for fold, (tr_idx, va_idx) in enumerate(skf.split(np.zeros(len(y)), y), start=1):
+        for fold, (tr_idx, va_idx) in enumerate(
+            skf.split(np.zeros(len(y)), y), start=1
+        ):
             est = make_estimator(int(seed))
 
             pipe = Pipeline(steps=[("pre", pre), ("cast32", cast32), ("model", est)])
@@ -221,26 +266,45 @@ def main(argv: list[str] | None = None) -> int:
             oof[va_idx] = p_va
             test_accum += p_te / float(args.folds)
 
-            ll = log_loss(y[va_idx], np.clip(p_va, 1e-15, 1 - 1e-15), sample_weight=sample_weight[va_idx])
+            ll = log_loss(
+                y[va_idx],
+                np.clip(p_va, 1e-15, 1 - 1e-15),
+                sample_weight=sample_weight[va_idx],
+            )
             auc = roc_auc_score(y[va_idx], p_va)
             if args.verbose:
-                print(f"[seed={seed}] fold={fold}/{args.folds} logloss={ll:.6f} auc={auc:.6f}", flush=True)
+                print(
+                    f"[seed={seed}] fold={fold}/{args.folds} logloss={ll:.6f} auc={auc:.6f}",
+                    flush=True,
+                )
 
-        ll_all = log_loss(y, np.clip(oof, 1e-15, 1 - 1e-15), sample_weight=sample_weight)
+        ll_all = log_loss(
+            y, np.clip(oof, 1e-15, 1 - 1e-15), sample_weight=sample_weight
+        )
         auc_all = roc_auc_score(y, oof)
         if args.verbose:
-            print(f"[seed {si}/{len(seeds)}] done seed={seed} OOF logloss={ll_all:.6f} auc={auc_all:.6f}", flush=True)
+            print(
+                f"[seed {si}/{len(seeds)}] done seed={seed} OOF logloss={ll_all:.6f} auc={auc_all:.6f}",
+                flush=True,
+            )
 
         oof_ens += oof / float(len(seeds))
         test_ens += test_accum / float(len(seeds))
 
-    ll_final = log_loss(y, np.clip(oof_ens, 1e-15, 1 - 1e-15), sample_weight=sample_weight)
+    ll_final = log_loss(
+        y, np.clip(oof_ens, 1e-15, 1 - 1e-15), sample_weight=sample_weight
+    )
     auc_final = roc_auc_score(y, oof_ens)
     if args.verbose:
-        print(f"[final] model={model_kind} seeds={len(seeds)} OOF logloss={ll_final:.6f} auc={auc_final:.6f}", flush=True)
+        print(
+            f"[final] model={model_kind} seeds={len(seeds)} OOF logloss={ll_final:.6f} auc={auc_final:.6f}",
+            flush=True,
+        )
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    sub = pd.DataFrame({"id": test_ids, "diagnosed_diabetes": np.clip(test_ens, 0.0, 1.0)})
+    sub = pd.DataFrame(
+        {"id": test_ids, "diagnosed_diabetes": np.clip(test_ens, 0.0, 1.0)}
+    )
     sub.to_csv(args.out, index=False)
     if args.verbose:
         print(f"[done] wrote {args.out} rows={len(sub)}", flush=True)
@@ -248,14 +312,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.oof_out is not None:
         oof_path = Path(args.oof_out)
         oof_path.parent.mkdir(parents=True, exist_ok=True)
-        oof_df = pd.DataFrame({"id": train_ids, "y": y.astype(np.int64), "oof_pred": np.clip(oof_ens, 0.0, 1.0)})
+        oof_df = pd.DataFrame(
+            {
+                "id": train_ids,
+                "y": y.astype(np.int64),
+                "oof_pred": np.clip(oof_ens, 0.0, 1.0),
+            }
+        )
         oof_df.to_csv(oof_path, index=False)
         if args.verbose:
             print(f"[done] wrote {oof_path} rows={len(oof_df)}", flush=True)
 
     if args.zip_output:
         zip_path = args.out.with_suffix(".zip")
-        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(
+            zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as zf:
             zf.write(args.out, arcname=args.out.name)
         if args.verbose:
             print(f"[done] wrote {zip_path}", flush=True)

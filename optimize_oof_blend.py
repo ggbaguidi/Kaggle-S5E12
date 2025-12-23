@@ -53,12 +53,19 @@ def _read_oof(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     need = {"id", "y", "oof_pred"}
     if set(df.columns) != need:
-        raise ValueError(f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})")
+        raise ValueError(
+            f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})"
+        )
     df = df.copy()
     df["id"] = pd.to_numeric(df["id"], errors="coerce").fillna(0).astype(np.int64)
     df["y"] = pd.to_numeric(df["y"], errors="coerce").fillna(0).astype(np.int64)
     df["y"] = np.where(df["y"].to_numpy() > 0, 1, 0).astype(np.int64)
-    df["oof_pred"] = pd.to_numeric(df["oof_pred"], errors="coerce").fillna(0.5).clip(0, 1).astype(np.float64)
+    df["oof_pred"] = (
+        pd.to_numeric(df["oof_pred"], errors="coerce")
+        .fillna(0.5)
+        .clip(0, 1)
+        .astype(np.float64)
+    )
     return df
 
 
@@ -66,10 +73,17 @@ def _read_sub(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     need = {"id", "diagnosed_diabetes"}
     if set(df.columns) != need:
-        raise ValueError(f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})")
+        raise ValueError(
+            f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})"
+        )
     df = df.copy()
     df["id"] = pd.to_numeric(df["id"], errors="coerce").fillna(0).astype(np.int64)
-    df["diagnosed_diabetes"] = pd.to_numeric(df["diagnosed_diabetes"], errors="coerce").fillna(0.5).clip(0, 1).astype(np.float64)
+    df["diagnosed_diabetes"] = (
+        pd.to_numeric(df["diagnosed_diabetes"], errors="coerce")
+        .fillna(0.5)
+        .clip(0, 1)
+        .astype(np.float64)
+    )
     return df
 
 
@@ -97,13 +111,22 @@ def _blend(P: np.ndarray, w: np.ndarray, mode: str) -> np.ndarray:
     raise ValueError("mode must be prob or logit")
 
 
-def _dirichlet_samples(rng: np.random.Generator, n: int, k: int, alpha: float) -> np.ndarray:
+def _dirichlet_samples(
+    rng: np.random.Generator, n: int, k: int, alpha: float
+) -> np.ndarray:
     # returns (n, k)
     a = np.full(k, float(alpha), dtype=np.float64)
     return rng.dirichlet(a, size=int(n))
 
 
-def _local_refine(rng: np.random.Generator, best: Best, P: np.ndarray, y: np.ndarray, mode: str, steps: int) -> Best:
+def _local_refine(
+    rng: np.random.Generator,
+    best: Best,
+    P: np.ndarray,
+    y: np.ndarray,
+    mode: str,
+    steps: int,
+) -> Best:
     w = best.w.copy()
     loss = best.loss
     k = len(w)
@@ -133,7 +156,12 @@ def main(argv: list[str] | None = None) -> int:
 
     p.add_argument("--mode", type=str, default="logit", help="prob|logit")
     p.add_argument("--trials", type=int, default=5000)
-    p.add_argument("--alpha", type=float, default=1.0, help="Dirichlet concentration (lower => sparser)")
+    p.add_argument(
+        "--alpha",
+        type=float,
+        default=1.0,
+        help="Dirichlet concentration (lower => sparser)",
+    )
     p.add_argument("--refine-steps", type=int, default=1000)
     p.add_argument("--seed", type=int, default=42)
 
@@ -166,8 +194,12 @@ def main(argv: list[str] | None = None) -> int:
         if not np.array_equal(test_ids, df["id"].to_numpy()):
             raise ValueError(f"Test IDs mismatch between subs[0] and subs[{i-1}]")
 
-    P_oof = np.vstack([df["oof_pred"].to_numpy(dtype=np.float64) for df in oofs]).T  # (n, m)
-    P_test = np.vstack([df["diagnosed_diabetes"].to_numpy(dtype=np.float64) for df in subs]).T
+    P_oof = np.vstack(
+        [df["oof_pred"].to_numpy(dtype=np.float64) for df in oofs]
+    ).T  # (n, m)
+    P_test = np.vstack(
+        [df["diagnosed_diabetes"].to_numpy(dtype=np.float64) for df in subs]
+    ).T
 
     base_losses = []
     for i in range(P_oof.shape[1]):
@@ -196,22 +228,36 @@ def main(argv: list[str] | None = None) -> int:
     p_test = _blend(P_test, best.w, mode)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    out = pd.DataFrame({"id": test_ids, "diagnosed_diabetes": np.clip(p_test, 0.0, 1.0)})
+    out = pd.DataFrame(
+        {"id": test_ids, "diagnosed_diabetes": np.clip(p_test, 0.0, 1.0)}
+    )
     out.to_csv(args.out, index=False)
 
     if args.verbose:
         names = [p.name for p in args.oof]
         order = np.argsort(best.w)[::-1]
-        top = [(names[i], float(best.w[i])) for i in order[: min(10, len(order))] if best.w[i] > 1e-4]
-        print(f"[opt] mode={mode} models={len(names)} trials={int(args.trials)} alpha={float(args.alpha)} refine={int(args.refine_steps)}", flush=True)
+        top = [
+            (names[i], float(best.w[i]))
+            for i in order[: min(10, len(order))]
+            if best.w[i] > 1e-4
+        ]
+        print(
+            f"[opt] mode={mode} models={len(names)} trials={int(args.trials)} alpha={float(args.alpha)} refine={int(args.refine_steps)}",
+            flush=True,
+        )
         print(f"[opt] best_logloss={best.loss:.6f}", flush=True)
-        print(f"[opt] base_logloss(min/mean/max)={float(np.min(base_losses)):.6f}/{float(np.mean(base_losses)):.6f}/{float(np.max(base_losses)):.6f}", flush=True)
+        print(
+            f"[opt] base_logloss(min/mean/max)={float(np.min(base_losses)):.6f}/{float(np.mean(base_losses)):.6f}/{float(np.max(base_losses)):.6f}",
+            flush=True,
+        )
         print(f"[opt] weights(top)={top}", flush=True)
         print(f"[done] wrote {args.out} rows={len(out)}", flush=True)
 
     if args.zip_output:
         zip_path = args.out.with_suffix(".zip")
-        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(
+            zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as zf:
             zf.write(args.out, arcname=args.out.name)
         if args.verbose:
             print(f"[done] wrote {zip_path}", flush=True)

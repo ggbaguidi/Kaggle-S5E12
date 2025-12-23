@@ -47,13 +47,20 @@ def _make_stratified_folds(y: np.ndarray, n_splits: int, seed: int) -> np.ndarra
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="JAX adversarial reweighting (train-vs-test)")
+    p = argparse.ArgumentParser(
+        description="JAX adversarial reweighting (train-vs-test)"
+    )
     p.add_argument("--train", type=Path, default=Path("data/train.csv"))
     p.add_argument("--test", type=Path, default=Path("data/test.csv"))
     p.add_argument("--out", type=Path, default=Path("sub/train_weights_adv_jax.csv"))
 
     p.add_argument("--id-col", type=str, default="id")
-    p.add_argument("--target-col", type=str, default="diagnosed_diabetes", help="Ignored (only used to drop from features)")
+    p.add_argument(
+        "--target-col",
+        type=str,
+        default="diagnosed_diabetes",
+        help="Ignored (only used to drop from features)",
+    )
 
     p.add_argument("--folds", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
@@ -74,7 +81,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p.add_argument("--clip-min", type=float, default=0.2)
     p.add_argument("--clip-max", type=float, default=5.0)
-    p.add_argument("--normalize", action="store_true", help="Normalize weights to mean=1")
+    p.add_argument(
+        "--normalize", action="store_true", help="Normalize weights to mean=1"
+    )
 
     p.add_argument("--verbose", type=int, default=1)
 
@@ -100,9 +109,13 @@ def main(argv: list[str] | None = None) -> int:
     feature_cols = [c for c in train_df.columns if c not in {id_col, target_col}]
 
     if args.max_train_rows and args.max_train_rows > 0:
-        train_df = train_df.sample(n=min(int(args.max_train_rows), len(train_df)), random_state=int(args.seed)).reset_index(drop=True)
+        train_df = train_df.sample(
+            n=min(int(args.max_train_rows), len(train_df)), random_state=int(args.seed)
+        ).reset_index(drop=True)
     if args.max_test_rows and args.max_test_rows > 0:
-        test_df = test_df.sample(n=min(int(args.max_test_rows), len(test_df)), random_state=int(args.seed)).reset_index(drop=True)
+        test_df = test_df.sample(
+            n=min(int(args.max_test_rows), len(test_df)), random_state=int(args.seed)
+        ).reset_index(drop=True)
 
     pre = fit_preprocessor(
         train_df,
@@ -122,12 +135,16 @@ def main(argv: list[str] | None = None) -> int:
     # Domain labels: train=0, test=1
     x_num = np.concatenate([x_num_tr, x_num_te], axis=0)
     x_cat = np.concatenate([x_cat_tr, x_cat_te], axis=0)
-    d = np.concatenate([
-        np.zeros(len(train_df), dtype=np.float32),
-        np.ones(len(test_df), dtype=np.float32),
-    ])
+    d = np.concatenate(
+        [
+            np.zeros(len(train_df), dtype=np.float32),
+            np.ones(len(test_df), dtype=np.float32),
+        ]
+    )
 
-    fold_id = _make_stratified_folds(d.astype(np.int64), int(args.folds), int(args.seed))
+    fold_id = _make_stratified_folds(
+        d.astype(np.int64), int(args.folds), int(args.seed)
+    )
 
     hidden = [int(s.strip()) for s in str(args.hidden).split(",") if s.strip()]
     if not hidden:
@@ -144,7 +161,11 @@ def main(argv: list[str] | None = None) -> int:
             parts = []
             if x_cat.shape[1] > 0:
                 for i, size in enumerate(self.cat_sizes):
-                    emb = nn.Embed(num_embeddings=int(max(2, size)), features=int(self.embed_dim), name=f"emb_{i}")
+                    emb = nn.Embed(
+                        num_embeddings=int(max(2, size)),
+                        features=int(self.embed_dim),
+                        name=f"emb_{i}",
+                    )
                     parts.append(emb(x_cat[:, i]))
             if x_num.shape[1] > 0:
                 parts.append(x_num)
@@ -158,7 +179,12 @@ def main(argv: list[str] | None = None) -> int:
             x = nn.Dense(1)(x).squeeze(-1)
             return x  # logits
 
-    model = DomainMLP(cat_sizes=pre.cat_sizes, embed_dim=int(args.embed_dim), hidden=hidden, dropout=float(args.dropout))
+    model = DomainMLP(
+        cat_sizes=pre.cat_sizes,
+        embed_dim=int(args.embed_dim),
+        hidden=hidden,
+        dropout=float(args.dropout),
+    )
 
     def create_state(rng_key):
         params = model.init(
@@ -167,13 +193,17 @@ def main(argv: list[str] | None = None) -> int:
             jnp.zeros((1, x_cat.shape[1]), dtype=jnp.int32),
             train=True,
         )["params"]
-        tx = optax.adamw(learning_rate=float(args.lr), weight_decay=float(args.weight_decay))
+        tx = optax.adamw(
+            learning_rate=float(args.lr), weight_decay=float(args.weight_decay)
+        )
         return train_state.TrainState.create(apply_fn=model.apply, params=params, tx=tx)
 
     @jax.jit
     def train_step(state, xnb, xcb, yb, rng_key):
         def loss_fn(params):
-            logits = state.apply_fn({"params": params}, xnb, xcb, train=True, rngs={"dropout": rng_key})
+            logits = state.apply_fn(
+                {"params": params}, xnb, xcb, train=True, rngs={"dropout": rng_key}
+            )
             return jnp.mean(optax.sigmoid_binary_cross_entropy(logits, yb))
 
         loss, grads = jax.value_and_grad(loss_fn)(state.params)
@@ -230,7 +260,9 @@ def main(argv: list[str] | None = None) -> int:
             ll = float((-(yv * np.log(pv) + (1 - yv) * np.log1p(-pv))).mean())
 
             if args.verbose >= 2:
-                print(f"[adv fold={f}] epoch={epoch+1} val_logloss={ll:.6f}", flush=True)
+                print(
+                    f"[adv fold={f}] epoch={epoch+1} val_logloss={ll:.6f}", flush=True
+                )
 
             if ll + 1e-6 < best_loss:
                 best_loss = ll
@@ -272,7 +304,10 @@ def main(argv: list[str] | None = None) -> int:
     out.to_csv(args.out, index=False)
 
     if args.verbose:
-        print(f"[adv] wrote {args.out} rows={len(out)} w(min/mean/max)={float(np.min(w)):.4f}/{float(np.mean(w)):.4f}/{float(np.max(w)):.4f}", flush=True)
+        print(
+            f"[adv] wrote {args.out} rows={len(out)} w(min/mean/max)={float(np.min(w)):.4f}/{float(np.mean(w)):.4f}/{float(np.max(w)):.4f}",
+            flush=True,
+        )
 
     return 0
 

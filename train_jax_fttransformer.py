@@ -89,10 +89,14 @@ def _read_train_weights(path: Path, train_ids: np.ndarray) -> np.ndarray:
     df = pd.read_csv(path)
     need = {"id", "weight"}
     if set(df.columns) != need:
-        raise ValueError(f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})")
+        raise ValueError(
+            f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})"
+        )
     df = df.copy()
     df["id"] = pd.to_numeric(df["id"], errors="coerce").fillna(0).astype(np.int64)
-    df["weight"] = pd.to_numeric(df["weight"], errors="coerce").fillna(1.0).astype(np.float32)
+    df["weight"] = (
+        pd.to_numeric(df["weight"], errors="coerce").fillna(1.0).astype(np.float32)
+    )
 
     w_map = dict(zip(df["id"].to_numpy(), df["weight"].to_numpy()))
     w = np.asarray([float(w_map.get(int(i), 1.0)) for i in train_ids], dtype=np.float32)
@@ -104,10 +108,17 @@ def _read_teacher_oof(path: Path, train_ids: np.ndarray) -> np.ndarray:
     df = pd.read_csv(path)
     need = {"id", "y", "oof_pred"}
     if set(df.columns) != need:
-        raise ValueError(f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})")
+        raise ValueError(
+            f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})"
+        )
     df = df.copy()
     df["id"] = pd.to_numeric(df["id"], errors="coerce").fillna(0).astype(np.int64)
-    df["oof_pred"] = pd.to_numeric(df["oof_pred"], errors="coerce").fillna(0.5).clip(0, 1).astype(np.float32)
+    df["oof_pred"] = (
+        pd.to_numeric(df["oof_pred"], errors="coerce")
+        .fillna(0.5)
+        .clip(0, 1)
+        .astype(np.float32)
+    )
 
     p_map = dict(zip(df["id"].to_numpy(), df["oof_pred"].to_numpy()))
     p = np.asarray([float(p_map.get(int(i), 0.5)) for i in train_ids], dtype=np.float32)
@@ -127,7 +138,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--train", type=Path, default=Path("data/train.csv"))
     p.add_argument("--test", type=Path, default=Path("data/test.csv"))
     p.add_argument("--out", type=Path, default=Path("sub/submission_jax_ftt.csv"))
-    p.add_argument("--oof-out", type=Path, default=None, help="Optional OOF CSV output (id,y,oof_pred)")
+    p.add_argument(
+        "--oof-out",
+        type=Path,
+        default=None,
+        help="Optional OOF CSV output (id,y,oof_pred)",
+    )
 
     p.add_argument("--id-col", type=str, default=None)
     p.add_argument("--target-col", type=str, default=None)
@@ -151,15 +167,31 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--weight-decay", type=float, default=1e-4)
     p.add_argument("--early-stop", type=int, default=3)
 
-    p.add_argument("--grad-clip", type=float, default=1.0, help="Global norm clip; <=0 disables")
-    p.add_argument("--lr-schedule", type=str, default="constant", help="constant|cosine")
+    p.add_argument(
+        "--grad-clip", type=float, default=1.0, help="Global norm clip; <=0 disables"
+    )
+    p.add_argument(
+        "--lr-schedule", type=str, default="constant", help="constant|cosine"
+    )
     p.add_argument("--warmup-epochs", type=float, default=0.0)
     p.add_argument("--min-lr", type=float, default=0.0)
 
-    p.add_argument("--train-weights", type=Path, default=None, help="CSV with columns id,weight")
+    p.add_argument(
+        "--train-weights", type=Path, default=None, help="CSV with columns id,weight"
+    )
 
-    p.add_argument("--teacher-oof", type=Path, default=None, help="Teacher OOF CSV (id,y,oof_pred) for distillation")
-    p.add_argument("--soft-alpha", type=float, default=0.0, help="Blend factor for teacher: y_soft = (1-a)*y + a*teacher")
+    p.add_argument(
+        "--teacher-oof",
+        type=Path,
+        default=None,
+        help="Teacher OOF CSV (id,y,oof_pred) for distillation",
+    )
+    p.add_argument(
+        "--soft-alpha",
+        type=float,
+        default=0.0,
+        help="Blend factor for teacher: y_soft = (1-a)*y + a*teacher",
+    )
     p.add_argument("--label-smoothing", type=float, default=0.0)
 
     p.add_argument("--zip-output", action="store_true")
@@ -184,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     def _print_runtime_info() -> None:
         import os
         import sys
+
         try:
             import jaxlib  # type: ignore
         except Exception:
@@ -191,12 +224,19 @@ def main(argv: list[str] | None = None) -> int:
 
         print(f"[runtime] python={sys.executable}", flush=True)
         try:
-            jl_ver = getattr(jaxlib, "__version__", "unknown") if jaxlib is not None else "missing"
+            jl_ver = (
+                getattr(jaxlib, "__version__", "unknown")
+                if jaxlib is not None
+                else "missing"
+            )
             print(f"[runtime] jax={jax.__version__} jaxlib={jl_ver}", flush=True)
         except Exception:
             pass
         if "JAX_PLATFORM_NAME" in os.environ:
-            print(f"[runtime] env JAX_PLATFORM_NAME={os.environ.get('JAX_PLATFORM_NAME')}", flush=True)
+            print(
+                f"[runtime] env JAX_PLATFORM_NAME={os.environ.get('JAX_PLATFORM_NAME')}",
+                flush=True,
+            )
 
         try:
             backend = jax.default_backend()
@@ -209,7 +249,10 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             dev_str = "unknown"
             ndev = 0
-        print(f"[runtime] jax_backend={backend} n_devices={ndev} devices={dev_str}", flush=True)
+        print(
+            f"[runtime] jax_backend={backend} n_devices={ndev} devices={dev_str}",
+            flush=True,
+        )
 
     _print_runtime_info()
 
@@ -217,9 +260,13 @@ def main(argv: list[str] | None = None) -> int:
     if not seeds:
         raise ValueError("--seeds is empty")
 
-    save_best_dir: Path | None = Path(args.save_best_dir) if args.save_best_dir is not None else None
+    save_best_dir: Path | None = (
+        Path(args.save_best_dir) if args.save_best_dir is not None else None
+    )
 
-    def _save_best_params(*, seed: int, fold: int, params: dict, best_val_logloss: float) -> None:
+    def _save_best_params(
+        *, seed: int, fold: int, params: dict, best_val_logloss: float
+    ) -> None:
         if save_best_dir is None:
             return
         save_best_dir.mkdir(parents=True, exist_ok=True)
@@ -252,14 +299,20 @@ def main(argv: list[str] | None = None) -> int:
             "early_stop": int(args.early_stop),
             "max_categories": int(args.max_categories),
             "max_train_rows": int(args.max_train_rows),
-            "train_weights": str(args.train_weights) if args.train_weights is not None else None,
-            "teacher_oof": str(args.teacher_oof) if args.teacher_oof is not None else None,
+            "train_weights": (
+                str(args.train_weights) if args.train_weights is not None else None
+            ),
+            "teacher_oof": (
+                str(args.teacher_oof) if args.teacher_oof is not None else None
+            ),
             "soft_alpha": float(args.soft_alpha),
             "label_smoothing": float(args.label_smoothing),
         }
         meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
 
-    def _try_load_best_params(*, seed: int, fold: int, target_params: dict) -> tuple[dict | None, float | None]:
+    def _try_load_best_params(
+        *, seed: int, fold: int, target_params: dict
+    ) -> tuple[dict | None, float | None]:
         """Return (params, best_val_logloss) if a checkpoint exists; else (None, None)."""
         if save_best_dir is None:
             return None, None
@@ -273,7 +326,9 @@ def main(argv: list[str] | None = None) -> int:
             loaded = serialization.from_bytes(target_params, params_path.read_bytes())
         except Exception as e:
             if args.verbose:
-                print(f"[warn] failed to load checkpoint {params_path}: {e}", flush=True)
+                print(
+                    f"[warn] failed to load checkpoint {params_path}: {e}", flush=True
+                )
             return None, None
 
         best_ll = None
@@ -296,10 +351,14 @@ def main(argv: list[str] | None = None) -> int:
     train_df = pd.read_csv(args.train)
     test_df = pd.read_csv(args.test)
 
-    id_col, target_col, feature_cols = infer_id_target_features(train_df, id_col=args.id_col, target_col=args.target_col)
+    id_col, target_col, feature_cols = infer_id_target_features(
+        train_df, id_col=args.id_col, target_col=args.target_col
+    )
 
     if args.max_train_rows and args.max_train_rows > 0:
-        train_df = train_df.sample(n=min(int(args.max_train_rows), len(train_df)), random_state=int(seeds[0])).reset_index(drop=True)
+        train_df = train_df.sample(
+            n=min(int(args.max_train_rows), len(train_df)), random_state=int(seeds[0])
+        ).reset_index(drop=True)
 
     pre = fit_preprocessor(
         train_df,
@@ -360,7 +419,9 @@ def main(argv: list[str] | None = None) -> int:
             d = x.shape[-1]
             gamma = self.param("gamma", lambda k: jnp.ones((d,), dtype=jnp.float32))
             beta = self.param("beta", lambda k: jnp.zeros((d,), dtype=jnp.float32))
-            alpha = self.param("alpha", lambda k: jnp.array(self.alpha_init, dtype=jnp.float32))
+            alpha = self.param(
+                "alpha", lambda k: jnp.array(self.alpha_init, dtype=jnp.float32)
+            )
             s = self.param("s", lambda k: jnp.array(self.s_init, dtype=jnp.float32))
             return gamma * jax.lax.erf(alpha * x + s) + beta
 
@@ -378,7 +439,9 @@ def main(argv: list[str] | None = None) -> int:
         @nn.compact
         def __call__(self, x_num):
             # x_num: (B, n_num)
-            w = self.param("w", nn.initializers.lecun_normal(), (self.n_num, self.d_model))
+            w = self.param(
+                "w", nn.initializers.lecun_normal(), (self.n_num, self.d_model)
+            )
             b = self.param("b", nn.initializers.zeros, (self.n_num, self.d_model))
             return x_num[:, :, None] * w[None, :, :] + b[None, :, :]
 
@@ -434,19 +497,29 @@ def main(argv: list[str] | None = None) -> int:
 
             # CLS token
             cls = self.param("cls", nn.initializers.normal(0.02), (self.d_model,))
-            cls_tok = jnp.broadcast_to(cls[None, None, :], (x_num.shape[0], 1, self.d_model))
+            cls_tok = jnp.broadcast_to(
+                cls[None, None, :], (x_num.shape[0], 1, self.d_model)
+            )
             tokens.append(cls_tok)
 
             if x_cat.shape[1] > 0:
                 cat_toks = []
                 for i, size in enumerate(self.cat_sizes):
-                    emb = nn.Embed(num_embeddings=int(max(2, size)), features=self.d_model, name=f"emb_{i}")
+                    emb = nn.Embed(
+                        num_embeddings=int(max(2, size)),
+                        features=self.d_model,
+                        name=f"emb_{i}",
+                    )
                     cat_toks.append(emb(x_cat[:, i]))
                 cat_toks = jnp.stack(cat_toks, axis=1)
                 tokens.append(cat_toks)
 
             if self.n_num > 0:
-                tokens.append(NumTokenEmbed(n_num=self.n_num, d_model=self.d_model, name="numtok")(x_num))
+                tokens.append(
+                    NumTokenEmbed(
+                        n_num=self.n_num, d_model=self.d_model, name="numtok"
+                    )(x_num)
+                )
 
             x = jnp.concatenate(tokens, axis=1)
             x = nn.Dropout(rate=self.dropout)(x, deterministic=not train)
@@ -495,7 +568,9 @@ def main(argv: list[str] | None = None) -> int:
             lr_schedule = lr0
         else:
             total_steps = int(max(1, int(steps_per_epoch) * int(epochs)))
-            warmup_steps = int(max(0, round(float(args.warmup_epochs) * int(steps_per_epoch))))
+            warmup_steps = int(
+                max(0, round(float(args.warmup_epochs) * int(steps_per_epoch)))
+            )
             warmup_steps = int(min(warmup_steps, max(0, total_steps - 1)))
             lr_schedule = optax.warmup_cosine_decay_schedule(
                 init_value=min_lr,
@@ -509,7 +584,11 @@ def main(argv: list[str] | None = None) -> int:
         gc = float(args.grad_clip)
         if gc and gc > 0:
             transforms.append(optax.clip_by_global_norm(gc))
-        transforms.append(optax.adamw(learning_rate=lr_schedule, weight_decay=float(args.weight_decay)))
+        transforms.append(
+            optax.adamw(
+                learning_rate=lr_schedule, weight_decay=float(args.weight_decay)
+            )
+        )
         tx = optax.chain(*transforms)
         return train_state.TrainState.create(apply_fn=model.apply, params=params, tx=tx)
 
@@ -572,14 +651,20 @@ def main(argv: list[str] | None = None) -> int:
             bs = int(args.batch_size)
             n_train = int(len(tr_idx))
             steps_per_epoch = int(max(1, (n_train + bs - 1) // bs))
-            state = create_state(jax.random.fold_in(key, f), steps_per_epoch=steps_per_epoch, epochs=int(args.epochs))
+            state = create_state(
+                jax.random.fold_in(key, f),
+                steps_per_epoch=steps_per_epoch,
+                epochs=int(args.epochs),
+            )
 
             schedule_kind = str(args.lr_schedule).strip().lower()
             if schedule_kind == "constant":
                 lr_fn = None
             else:
                 total_steps = int(max(1, steps_per_epoch * int(args.epochs)))
-                warmup_steps = int(max(0, round(float(args.warmup_epochs) * steps_per_epoch)))
+                warmup_steps = int(
+                    max(0, round(float(args.warmup_epochs) * steps_per_epoch))
+                )
                 warmup_steps = int(min(warmup_steps, max(0, total_steps - 1)))
                 lr_fn = optax.warmup_cosine_decay_schedule(
                     init_value=float(args.min_lr),
@@ -590,7 +675,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
             # Resume from previous best checkpoint (if present).
-            loaded_params, loaded_best = _try_load_best_params(seed=seed, fold=f, target_params=state.params)
+            loaded_params, loaded_best = _try_load_best_params(
+                seed=seed, fold=f, target_params=state.params
+            )
             if loaded_params is not None:
                 state = state.replace(params=loaded_params)
 
@@ -647,7 +734,12 @@ def main(argv: list[str] | None = None) -> int:
                 if ll + 1e-6 < best_loss:
                     best_loss = ll
                     best_params = state.params
-                    _save_best_params(seed=seed, fold=f, params=best_params, best_val_logloss=best_loss)
+                    _save_best_params(
+                        seed=seed,
+                        fold=f,
+                        params=best_params,
+                        best_val_logloss=best_loss,
+                    )
                     bad = 0
                 else:
                     bad += 1
@@ -682,12 +774,18 @@ def main(argv: list[str] | None = None) -> int:
             test_pred += p_te / float(folds)
 
             if args.verbose:
-                print(f"[seed={seed}] fold={f} best_val_logloss={best_loss:.6f}", flush=True)
+                print(
+                    f"[seed={seed}] fold={f} best_val_logloss={best_loss:.6f}",
+                    flush=True,
+                )
 
         # overall metrics on hard labels
         overall_ll = _logloss_np(y_hard, oof, base_w)
         if args.verbose:
-            print(f"[seed={seed}] OOF logloss={overall_ll:.6f} fold_mean={float(np.mean(fold_losses)):.6f}", flush=True)
+            print(
+                f"[seed={seed}] OOF logloss={overall_ll:.6f} fold_mean={float(np.mean(fold_losses)):.6f}",
+                flush=True,
+            )
 
         return oof, test_pred, fold_losses
 
@@ -701,15 +799,23 @@ def main(argv: list[str] | None = None) -> int:
         test_ens += te_s / float(len(seeds))
         if args.verbose:
             ll = _logloss_np(y_hard, oof_s, base_w)
-            print(f"[seed {si}/{len(seeds)}] done seed={seed} oof_logloss={ll:.6f}", flush=True)
+            print(
+                f"[seed {si}/{len(seeds)}] done seed={seed} oof_logloss={ll:.6f}",
+                flush=True,
+            )
 
     final_ll = _logloss_np(y_hard, oof_ens, base_w)
     if args.verbose:
-        print(f"[final] ensemble_seeds={len(seeds)} oof_logloss={final_ll:.6f}", flush=True)
+        print(
+            f"[final] ensemble_seeds={len(seeds)} oof_logloss={final_ll:.6f}",
+            flush=True,
+        )
 
     # Write submission
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    sub = pd.DataFrame({"id": test_ids, "diagnosed_diabetes": np.clip(test_ens, 0.0, 1.0)})
+    sub = pd.DataFrame(
+        {"id": test_ids, "diagnosed_diabetes": np.clip(test_ens, 0.0, 1.0)}
+    )
     sub.to_csv(args.out, index=False)
     if args.verbose:
         print(f"[done] wrote {args.out} rows={len(sub)}", flush=True)
@@ -718,14 +824,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.oof_out is not None:
         out_oof = Path(args.oof_out)
         out_oof.parent.mkdir(parents=True, exist_ok=True)
-        oof_df = pd.DataFrame({"id": train_ids, "y": y_hard.astype(np.int64), "oof_pred": np.clip(oof_ens, 0.0, 1.0)})
+        oof_df = pd.DataFrame(
+            {
+                "id": train_ids,
+                "y": y_hard.astype(np.int64),
+                "oof_pred": np.clip(oof_ens, 0.0, 1.0),
+            }
+        )
         oof_df.to_csv(out_oof, index=False)
         if args.verbose:
             print(f"[done] wrote {out_oof} rows={len(oof_df)}", flush=True)
 
     if args.zip_output:
         zip_path = args.out.with_suffix(".zip")
-        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(
+            zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as zf:
             zf.write(args.out, arcname=args.out.name)
         if args.verbose:
             print(f"[done] wrote {zip_path}", flush=True)

@@ -27,12 +27,19 @@ def _read_oof(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     need = {"id", "y", "oof_pred"}
     if set(df.columns) != need:
-        raise ValueError(f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})")
+        raise ValueError(
+            f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})"
+        )
     df = df.copy()
     df["id"] = pd.to_numeric(df["id"], errors="coerce").fillna(0).astype(np.int64)
     df["y"] = pd.to_numeric(df["y"], errors="coerce").fillna(0).astype(np.int64)
     df["y"] = np.where(df["y"].to_numpy() > 0, 1, 0).astype(np.int64)
-    df["oof_pred"] = pd.to_numeric(df["oof_pred"], errors="coerce").fillna(0.5).clip(0, 1).astype(np.float64)
+    df["oof_pred"] = (
+        pd.to_numeric(df["oof_pred"], errors="coerce")
+        .fillna(0.5)
+        .clip(0, 1)
+        .astype(np.float64)
+    )
     return df
 
 
@@ -40,10 +47,17 @@ def _read_sub(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     need = {"id", "diagnosed_diabetes"}
     if set(df.columns) != need:
-        raise ValueError(f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})")
+        raise ValueError(
+            f"Bad columns in {path}: {list(df.columns)} (need {sorted(need)})"
+        )
     df = df.copy()
     df["id"] = pd.to_numeric(df["id"], errors="coerce").fillna(0).astype(np.int64)
-    df["diagnosed_diabetes"] = pd.to_numeric(df["diagnosed_diabetes"], errors="coerce").fillna(0.5).clip(0, 1).astype(np.float64)
+    df["diagnosed_diabetes"] = (
+        pd.to_numeric(df["diagnosed_diabetes"], errors="coerce")
+        .fillna(0.5)
+        .clip(0, 1)
+        .astype(np.float64)
+    )
     return df
 
 
@@ -53,8 +67,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--subs", nargs="+", type=Path, required=True)
     p.add_argument("--out", type=Path, default=Path("sub/submission_stack_jax.csv"))
 
-    p.add_argument("--features", type=str, default="logit", help="prob|logit|prob,logit")
-    p.add_argument("--C", type=float, default=1.0, help="Inverse L2 regularization (like sklearn)")
+    p.add_argument(
+        "--features", type=str, default="logit", help="prob|logit|prob,logit"
+    )
+    p.add_argument(
+        "--C", type=float, default=1.0, help="Inverse L2 regularization (like sklearn)"
+    )
     p.add_argument("--steps", type=int, default=3000)
     p.add_argument("--lr", type=float, default=0.05)
     p.add_argument("--seed", type=int, default=42)
@@ -92,8 +110,12 @@ def main(argv: list[str] | None = None) -> int:
     if any(s not in {"prob", "logit"} for s in feat_set):
         raise ValueError("--features must be prob|logit|prob,logit")
 
-    P_oof = np.vstack([df["oof_pred"].to_numpy(dtype=np.float64) for df in oofs]).T  # (n, m)
-    P_test = np.vstack([df["diagnosed_diabetes"].to_numpy(dtype=np.float64) for df in subs]).T
+    P_oof = np.vstack(
+        [df["oof_pred"].to_numpy(dtype=np.float64) for df in oofs]
+    ).T  # (n, m)
+    P_test = np.vstack(
+        [df["diagnosed_diabetes"].to_numpy(dtype=np.float64) for df in subs]
+    ).T
 
     def build_X(P: np.ndarray) -> np.ndarray:
         cols = []
@@ -160,13 +182,18 @@ def main(argv: list[str] | None = None) -> int:
     out.to_csv(args.out, index=False)
 
     if args.verbose:
-        print(f"[stack-jax] models={len(args.oof)} features={feat_set} C={float(args.C)} steps={int(args.steps)} lr={float(args.lr)}", flush=True)
+        print(
+            f"[stack-jax] models={len(args.oof)} features={feat_set} C={float(args.C)} steps={int(args.steps)} lr={float(args.lr)}",
+            flush=True,
+        )
         print(f"[stack-jax] OOF logloss={ll:.6f}", flush=True)
         print(f"[done] wrote {args.out} rows={len(out)}", flush=True)
 
     if args.zip_output:
         zip_path = args.out.with_suffix(".zip")
-        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(
+            zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as zf:
             zf.write(args.out, arcname=args.out.name)
         if args.verbose:
             print(f"[done] wrote {zip_path}", flush=True)

@@ -32,7 +32,9 @@ def infer_id_target_features(
     target_col: str | None,
 ) -> tuple[str, str, list[str]]:
     id_col = id_col or ("id" if "id" in train.columns else train.columns[0])
-    target_col = target_col or ("diagnosed_diabetes" if "diagnosed_diabetes" in train.columns else None)
+    target_col = target_col or (
+        "diagnosed_diabetes" if "diagnosed_diabetes" in train.columns else None
+    )
     if target_col is None or target_col not in train.columns:
         raise ValueError("Could not infer target column; pass --target-col")
     features = [c for c in train.columns if c not in (id_col, target_col)]
@@ -67,13 +69,23 @@ class TabularPreprocessor:
         return [len(self.cat_keep[c]) for c in self.cat_cols]
 
     def transform_ids(self, df: pd.DataFrame) -> np.ndarray:
-        ids = pd.to_numeric(df[self.id_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+        ids = (
+            pd.to_numeric(df[self.id_col], errors="coerce")
+            .fillna(0)
+            .astype(np.int64)
+            .to_numpy()
+        )
         return ids
 
     def transform_y(self, df: pd.DataFrame) -> np.ndarray:
         if self.target_col is None:
             raise ValueError("No target_col set on this preprocessor")
-        y = pd.to_numeric(df[self.target_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+        y = (
+            pd.to_numeric(df[self.target_col], errors="coerce")
+            .fillna(0)
+            .astype(np.int64)
+            .to_numpy()
+        )
         y = np.where(y > 0, 1, 0).astype(np.float32, copy=False)
         return y
 
@@ -105,7 +117,11 @@ class TabularPreprocessor:
 
         # Numeric -> float32 standardized
         if self.num_cols:
-            x = df[self.num_cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=np.float32, copy=False)
+            x = (
+                df[self.num_cols]
+                .apply(pd.to_numeric, errors="coerce")
+                .to_numpy(dtype=np.float32, copy=False)
+            )
             x = np.where(np.isfinite(x), x, np.nan).astype(np.float32, copy=False)
             x = np.where(np.isnan(x), self.num_mean[None, :], x)
             x = (x - self.num_mean[None, :]) / self.num_std[None, :]
@@ -130,11 +146,19 @@ class TabularPreprocessor:
 
     @staticmethod
     def from_json(obj: dict[str, Any]) -> "TabularPreprocessor":
-        cat_keep: dict[str, list[str]] = {k: list(v) for k, v in dict(obj["cat_keep"]).items()}
-        cat_to_index = {k: {vv: i for i, vv in enumerate(v)} for k, v in cat_keep.items()}
+        cat_keep: dict[str, list[str]] = {
+            k: list(v) for k, v in dict(obj["cat_keep"]).items()
+        }
+        cat_to_index = {
+            k: {vv: i for i, vv in enumerate(v)} for k, v in cat_keep.items()
+        }
         return TabularPreprocessor(
             id_col=str(obj["id_col"]),
-            target_col=(None if obj.get("target_col") in (None, "") else str(obj.get("target_col"))),
+            target_col=(
+                None
+                if obj.get("target_col") in (None, "")
+                else str(obj.get("target_col"))
+            ),
             feature_cols=list(obj["feature_cols"]),
             num_cols=list(obj["num_cols"]),
             cat_cols=list(obj["cat_cols"]),
@@ -173,8 +197,14 @@ def fit_preprocessor(
 
     # Numeric stats from train only.
     if num_cols:
-        tr_num = train[num_cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=np.float32, copy=False)
-        tr_num = np.where(np.isfinite(tr_num), tr_num, np.nan).astype(np.float32, copy=False)
+        tr_num = (
+            train[num_cols]
+            .apply(pd.to_numeric, errors="coerce")
+            .to_numpy(dtype=np.float32, copy=False)
+        )
+        tr_num = np.where(np.isfinite(tr_num), tr_num, np.nan).astype(
+            np.float32, copy=False
+        )
         mean = np.nanmean(tr_num, axis=0).astype(np.float32)
         std = np.nanstd(tr_num, axis=0).astype(np.float32)
         std = np.where(std < 1e-6, 1.0, std).astype(np.float32)
@@ -198,7 +228,11 @@ def fit_preprocessor(
         vc = combo.value_counts(dropna=False)
         # Reserve 2 slots for MISSING and OTHER
         k = max_categories - 2
-        top = vc.nlargest(k).index.astype(str).tolist() if len(vc) > k else vc.index.astype(str).tolist()
+        top = (
+            vc.nlargest(k).index.astype(str).tolist()
+            if len(vc) > k
+            else vc.index.astype(str).tolist()
+        )
 
         # Ensure special tokens exist and have stable indices.
         keep_list = [MISSING_TOKEN, OTHER_TOKEN]

@@ -19,9 +19,13 @@ import numpy as np
 import pandas as pd
 
 
-def _infer_cols(train: pd.DataFrame, id_col: str | None, target_col: str | None) -> tuple[str, str, list[str]]:
+def _infer_cols(
+    train: pd.DataFrame, id_col: str | None, target_col: str | None
+) -> tuple[str, str, list[str]]:
     id_col = id_col or ("id" if "id" in train.columns else train.columns[0])
-    target_col = target_col or ("diagnosed_diabetes" if "diagnosed_diabetes" in train.columns else None)
+    target_col = target_col or (
+        "diagnosed_diabetes" if "diagnosed_diabetes" in train.columns else None
+    )
     if target_col is None or target_col not in train.columns:
         raise ValueError("Could not infer target column; pass --target-col")
     features = [c for c in train.columns if c not in (id_col, target_col)]
@@ -80,19 +84,35 @@ def train_cv_and_predict(
     if extra_train_path is not None:
         extra_train = pd.read_csv(extra_train_path)
 
-    id_col, target_col, features = _infer_cols(train, id_col=id_col, target_col=target_col)
+    id_col, target_col, features = _infer_cols(
+        train, id_col=id_col, target_col=target_col
+    )
 
-    y = pd.to_numeric(train[target_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+    y = (
+        pd.to_numeric(train[target_col], errors="coerce")
+        .fillna(0)
+        .astype(np.int64)
+        .to_numpy()
+    )
     y = np.where(y > 0, 1, 0).astype(np.int64, copy=False)
 
     if extra_train is not None:
         et = extra_target_col or target_col
         if et not in extra_train.columns:
-            raise ValueError(f"extra target column '{et}' not found in {extra_train_path}")
+            raise ValueError(
+                f"extra target column '{et}' not found in {extra_train_path}"
+            )
         missing = [c for c in features if c not in extra_train.columns]
         if missing:
-            raise ValueError(f"extra_train missing feature columns: {missing[:10]}{'...' if len(missing)>10 else ''}")
-        extra_y = pd.to_numeric(extra_train[et], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+            raise ValueError(
+                f"extra_train missing feature columns: {missing[:10]}{'...' if len(missing)>10 else ''}"
+            )
+        extra_y = (
+            pd.to_numeric(extra_train[et], errors="coerce")
+            .fillna(0)
+            .astype(np.int64)
+            .to_numpy()
+        )
         extra_y = np.where(extra_y > 0, 1, 0).astype(np.int64, copy=False)
         extra_train = extra_train[features + [et]].copy()
 
@@ -117,10 +137,19 @@ def train_cv_and_predict(
     test_pred_ens = np.zeros(len(test), dtype=np.float64)
 
     if verbose:
-        print(f"[cat] rows={len(train)} test_rows={len(test)} features={len(features)} cat_features={len(cat_idx)}", flush=True)
+        print(
+            f"[cat] rows={len(train)} test_rows={len(test)} features={len(features)} cat_features={len(cat_idx)}",
+            flush=True,
+        )
         if x_extra is not None:
-            print(f"[cat] extra_rows={len(x_extra)} extra_weight={extra_weight}", flush=True)
-        print(f"[cat] folds={folds} seeds={seed_list} iterations={iterations} od_wait={od_wait} threads={thread_count}", flush=True)
+            print(
+                f"[cat] extra_rows={len(x_extra)} extra_weight={extra_weight}",
+                flush=True,
+            )
+        print(
+            f"[cat] folds={folds} seeds={seed_list} iterations={iterations} od_wait={od_wait} threads={thread_count}",
+            flush=True,
+        )
 
     for s in seed_list:
         oof = np.zeros(len(train), dtype=np.float64)
@@ -133,10 +162,12 @@ def train_cv_and_predict(
             if x_extra is not None and extra_y is not None:
                 x_tr = pd.concat([x_tr, x_extra], axis=0, ignore_index=True)
                 y_tr = np.concatenate([y_tr, extra_y])
-                w_tr = np.concatenate([
-                    np.ones(len(tr_idx), dtype=np.float32),
-                    np.full(len(extra_y), float(extra_weight), dtype=np.float32),
-                ])
+                w_tr = np.concatenate(
+                    [
+                        np.ones(len(tr_idx), dtype=np.float32),
+                        np.full(len(extra_y), float(extra_weight), dtype=np.float32),
+                    ]
+                )
             else:
                 w_tr = None
 
@@ -178,12 +209,17 @@ def train_cv_and_predict(
             ll = log_loss(y_va, p_va)
             auc = roc_auc_score(y_va, p_va)
             if verbose:
-                print(f"[cat] seed={s} fold={fold} logloss={ll:.6f} auc={auc:.6f}", flush=True)
+                print(
+                    f"[cat] seed={s} fold={fold} logloss={ll:.6f} auc={auc:.6f}",
+                    flush=True,
+                )
 
         oof_ll = log_loss(y, np.clip(oof, 1e-15, 1 - 1e-15))
         oof_auc = roc_auc_score(y, oof)
         if verbose:
-            print(f"[cat] seed={s} OOF logloss={oof_ll:.6f} auc={oof_auc:.6f}", flush=True)
+            print(
+                f"[cat] seed={s} OOF logloss={oof_ll:.6f} auc={oof_auc:.6f}", flush=True
+            )
 
         oof_ens += oof / len(seed_list)
         test_pred_ens += test_pred / len(seed_list)
@@ -195,7 +231,9 @@ def train_cv_and_predict(
 
     sub = pd.DataFrame(
         {
-            "id": pd.to_numeric(test[id_col], errors="coerce").fillna(0).astype(np.int64),
+            "id": pd.to_numeric(test[id_col], errors="coerce")
+            .fillna(0)
+            .astype(np.int64),
             "diagnosed_diabetes": np.clip(test_pred_ens, 0.0, 1.0),
         }
     )
@@ -206,7 +244,9 @@ def train_cv_and_predict(
 
     if zip_output:
         zip_path = out_path.with_suffix(".zip")
-        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(
+            zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as zf:
             zf.write(out_path, arcname=out_path.name)
         if verbose:
             print(f"[done] wrote {zip_path}", flush=True)
@@ -214,7 +254,9 @@ def train_cv_and_predict(
     if oof_out is not None:
         oof_df = pd.DataFrame(
             {
-                "id": pd.to_numeric(train[id_col], errors="coerce").fillna(0).astype(np.int64),
+                "id": pd.to_numeric(train[id_col], errors="coerce")
+                .fillna(0)
+                .astype(np.int64),
                 "y": y.astype(np.int64, copy=False),
                 "oof_pred": np.clip(oof_ens, 0.0, 1.0).astype(np.float32),
             }
@@ -226,18 +268,40 @@ def train_cv_and_predict(
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="CatBoost CPU CV trainer for diabetes probability")
+    p = argparse.ArgumentParser(
+        description="CatBoost CPU CV trainer for diabetes probability"
+    )
     p.add_argument("--train", type=Path, default=Path("data/train.csv"))
     p.add_argument("--test", type=Path, default=Path("data/test.csv"))
     p.add_argument("--out", type=Path, default=Path("submission_cat.csv"))
     p.add_argument("--id-col", type=str, default=None)
     p.add_argument("--target-col", type=str, default=None)
 
-    p.add_argument("--oof-out", type=Path, default=None, help="Optional CSV output for OOF preds: id,y,oof_pred")
+    p.add_argument(
+        "--oof-out",
+        type=Path,
+        default=None,
+        help="Optional CSV output for OOF preds: id,y,oof_pred",
+    )
 
-    p.add_argument("--extra-train", type=Path, default=None, help="Optional extra training CSV (e.g., original dataset)")
-    p.add_argument("--extra-target-col", type=str, default=None, help="Target column name in extra train (default: same as --target-col)")
-    p.add_argument("--extra-weight", type=float, default=0.3, help="Downweight extra rows vs competition rows")
+    p.add_argument(
+        "--extra-train",
+        type=Path,
+        default=None,
+        help="Optional extra training CSV (e.g., original dataset)",
+    )
+    p.add_argument(
+        "--extra-target-col",
+        type=str,
+        default=None,
+        help="Target column name in extra train (default: same as --target-col)",
+    )
+    p.add_argument(
+        "--extra-weight",
+        type=float,
+        default=0.3,
+        help="Downweight extra rows vs competition rows",
+    )
 
     p.add_argument("--folds", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)

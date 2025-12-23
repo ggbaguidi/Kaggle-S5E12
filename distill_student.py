@@ -21,9 +21,13 @@ import numpy as np
 import pandas as pd
 
 
-def _infer_cols(train: pd.DataFrame, id_col: str | None, target_col: str | None) -> tuple[str, str, list[str]]:
+def _infer_cols(
+    train: pd.DataFrame, id_col: str | None, target_col: str | None
+) -> tuple[str, str, list[str]]:
     id_col = id_col or ("id" if "id" in train.columns else train.columns[0])
-    target_col = target_col or ("diagnosed_diabetes" if "diagnosed_diabetes" in train.columns else None)
+    target_col = target_col or (
+        "diagnosed_diabetes" if "diagnosed_diabetes" in train.columns else None
+    )
     if target_col is None or target_col not in train.columns:
         raise ValueError("Could not infer target column; pass --target-col")
     features = [c for c in train.columns if c not in (id_col, target_col)]
@@ -98,7 +102,9 @@ def distill_cv_and_predict(
     train = pd.read_csv(train_path)
     test = pd.read_csv(test_path)
 
-    id_col, target_col, features = _infer_cols(train, id_col=id_col, target_col=target_col)
+    id_col, target_col, features = _infer_cols(
+        train, id_col=id_col, target_col=target_col
+    )
 
     teacher = pd.read_csv(teacher_oof_path)
     if "oof_pred" not in teacher.columns:
@@ -108,15 +114,27 @@ def distill_cv_and_predict(
 
     train_id = pd.to_numeric(train[id_col], errors="coerce").fillna(0).astype(np.int64)
     teacher = teacher[["id", "oof_pred"]].copy()
-    teacher["id"] = pd.to_numeric(teacher["id"], errors="coerce").fillna(0).astype(np.int64)
-    teacher["oof_pred"] = pd.to_numeric(teacher["oof_pred"], errors="coerce").clip(0, 1).fillna(0.5).astype(np.float32)
+    teacher["id"] = (
+        pd.to_numeric(teacher["id"], errors="coerce").fillna(0).astype(np.int64)
+    )
+    teacher["oof_pred"] = (
+        pd.to_numeric(teacher["oof_pred"], errors="coerce")
+        .clip(0, 1)
+        .fillna(0.5)
+        .astype(np.float32)
+    )
 
     merged = pd.DataFrame({"id": train_id}).merge(teacher, on="id", how="left")
     if merged["oof_pred"].isna().any():
         missing = int(merged["oof_pred"].isna().sum())
         raise ValueError(f"teacher oof missing for {missing} train ids")
 
-    y_hard = pd.to_numeric(train[target_col], errors="coerce").fillna(0).astype(np.int64).to_numpy()
+    y_hard = (
+        pd.to_numeric(train[target_col], errors="coerce")
+        .fillna(0)
+        .astype(np.int64)
+        .to_numpy()
+    )
     y_hard = np.where(y_hard > 0, 1, 0).astype(np.int64, copy=False)
     t = merged["oof_pred"].to_numpy(dtype=np.float32, copy=False)
 
@@ -135,20 +153,28 @@ def distill_cv_and_predict(
         if id_col not in wdf.columns or "weight" not in wdf.columns:
             raise ValueError(f"train weights file must have columns: {id_col}, weight")
         wdf = wdf[[id_col, "weight"]].copy()
-        wdf[id_col] = pd.to_numeric(wdf[id_col], errors="coerce").fillna(0).astype(np.int64)
-        wdf["weight"] = pd.to_numeric(wdf["weight"], errors="coerce").fillna(1.0).astype(np.float32)
+        wdf[id_col] = (
+            pd.to_numeric(wdf[id_col], errors="coerce").fillna(0).astype(np.int64)
+        )
+        wdf["weight"] = (
+            pd.to_numeric(wdf["weight"], errors="coerce").fillna(1.0).astype(np.float32)
+        )
         wmerged = pd.DataFrame({"id": train_id}).merge(wdf, on="id", how="left")
         if wmerged["weight"].isna().any():
             missing = int(wmerged["weight"].isna().sum())
             raise ValueError(f"train weights missing for {missing} train ids")
         train_weights = wmerged["weight"].to_numpy(dtype=np.float32, copy=False)
 
-    train, test, categorical_cols = _prep_frames(train, test, features, max_categories=max_categories)
+    train, test, categorical_cols = _prep_frames(
+        train, test, features, max_categories=max_categories
+    )
 
     x = train[features]
     x_test = test[features]
 
-    skf = StratifiedKFold(n_splits=max(2, int(folds)), shuffle=True, random_state=int(seed))
+    skf = StratifiedKFold(
+        n_splits=max(2, int(folds)), shuffle=True, random_state=int(seed)
+    )
 
     params = {
         "objective": "regression",
@@ -171,8 +197,13 @@ def distill_cv_and_predict(
     test_pred = np.zeros(len(test), dtype=np.float64)
 
     if verbose:
-        print(f"[distill] rows={len(train)} test_rows={len(test)} features={len(features)} cats={len(categorical_cols)}", flush=True)
-        print(f"[distill] folds={folds} soft_alpha={a} label_smoothing={eps}", flush=True)
+        print(
+            f"[distill] rows={len(train)} test_rows={len(test)} features={len(features)} cats={len(categorical_cols)}",
+            flush=True,
+        )
+        print(
+            f"[distill] folds={folds} soft_alpha={a} label_smoothing={eps}", flush=True
+        )
 
     for fold, (tr_idx, va_idx) in enumerate(skf.split(x, y_hard), start=1):
         x_tr = x.iloc[tr_idx]
@@ -182,8 +213,20 @@ def distill_cv_and_predict(
 
         w_tr = train_weights[tr_idx] if train_weights is not None else None
 
-        dtrain = lgb.Dataset(x_tr, label=y_tr, weight=w_tr, categorical_feature=categorical_cols, free_raw_data=True)
-        dvalid = lgb.Dataset(x_va, label=y_va_soft, categorical_feature=categorical_cols, reference=dtrain, free_raw_data=True)
+        dtrain = lgb.Dataset(
+            x_tr,
+            label=y_tr,
+            weight=w_tr,
+            categorical_feature=categorical_cols,
+            free_raw_data=True,
+        )
+        dvalid = lgb.Dataset(
+            x_va,
+            label=y_va_soft,
+            categorical_feature=categorical_cols,
+            reference=dtrain,
+            free_raw_data=True,
+        )
 
         booster = lgb.train(
             params,
@@ -191,7 +234,9 @@ def distill_cv_and_predict(
             num_boost_round=int(num_boost_round),
             valid_sets=[dvalid],
             valid_names=["val"],
-            callbacks=[lgb.early_stopping(int(early_stopping_rounds), verbose=bool(verbose))],
+            callbacks=[
+                lgb.early_stopping(int(early_stopping_rounds), verbose=bool(verbose))
+            ],
         )
 
         p_va = booster.predict(x_va, num_iteration=booster.best_iteration)
@@ -204,7 +249,10 @@ def distill_cv_and_predict(
         ll = log_loss(y_hard[va_idx], np.clip(p_va, 1e-15, 1 - 1e-15))
         auc = roc_auc_score(y_hard[va_idx], p_va)
         if verbose:
-            print(f"[distill] fold={fold} best_iter={booster.best_iteration} logloss={ll:.6f} auc={auc:.6f}", flush=True)
+            print(
+                f"[distill] fold={fold} best_iter={booster.best_iteration} logloss={ll:.6f} auc={auc:.6f}",
+                flush=True,
+            )
 
     oof_ll = log_loss(y_hard, np.clip(oof, 1e-15, 1 - 1e-15))
     oof_auc = roc_auc_score(y_hard, oof)
@@ -213,7 +261,9 @@ def distill_cv_and_predict(
 
     sub = pd.DataFrame(
         {
-            "id": pd.to_numeric(test[id_col], errors="coerce").fillna(0).astype(np.int64),
+            "id": pd.to_numeric(test[id_col], errors="coerce")
+            .fillna(0)
+            .astype(np.int64),
             "diagnosed_diabetes": np.clip(test_pred, 0.0, 1.0),
         }
     )
@@ -224,22 +274,33 @@ def distill_cv_and_predict(
 
     if zip_output:
         zip_path = out_path.with_suffix(".zip")
-        with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(
+            zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as zf:
             zf.write(out_path, arcname=out_path.name)
         if verbose:
             print(f"[done] wrote {zip_path}", flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Teacher→student distillation (LightGBM regression student)")
+    p = argparse.ArgumentParser(
+        description="Teacher→student distillation (LightGBM regression student)"
+    )
     p.add_argument("--train", type=Path, default=Path("data/train.csv"))
     p.add_argument("--test", type=Path, default=Path("data/test.csv"))
-    p.add_argument("--teacher-oof", type=Path, required=True, help="CSV with columns: id,oof_pred")
+    p.add_argument(
+        "--teacher-oof", type=Path, required=True, help="CSV with columns: id,oof_pred"
+    )
     p.add_argument("--out", type=Path, default=Path("sub/submission_student.csv"))
     p.add_argument("--id-col", type=str, default=None)
     p.add_argument("--target-col", type=str, default=None)
 
-    p.add_argument("--train-weights", type=Path, default=None, help="Optional CSV with columns: id, weight")
+    p.add_argument(
+        "--train-weights",
+        type=Path,
+        default=None,
+        help="Optional CSV with columns: id, weight",
+    )
 
     p.add_argument("--folds", type=int, default=5)
     p.add_argument("--seed", type=int, default=42)
@@ -259,8 +320,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lambda-l2", type=float, default=1.0)
     p.add_argument("--max-categories", type=int, default=2000)
 
-    p.add_argument("--soft-alpha", type=float, default=1.0, help="Blend factor: 0=hard labels, 1=teacher only")
-    p.add_argument("--label-smoothing", type=float, default=0.0, help="Mix targets towards 0.5 (0..1)")
+    p.add_argument(
+        "--soft-alpha",
+        type=float,
+        default=1.0,
+        help="Blend factor: 0=hard labels, 1=teacher only",
+    )
+    p.add_argument(
+        "--label-smoothing",
+        type=float,
+        default=0.0,
+        help="Mix targets towards 0.5 (0..1)",
+    )
 
     p.add_argument("--zip-output", action="store_true")
     p.add_argument("--verbose", type=int, default=1)
