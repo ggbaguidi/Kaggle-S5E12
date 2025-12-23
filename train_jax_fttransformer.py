@@ -151,6 +151,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--weight-decay", type=float, default=1e-4)
     p.add_argument("--early-stop", type=int, default=3)
 
+    p.add_argument("--grad-clip", type=float, default=1.0, help="Global norm clip; <=0 disables")
+    p.add_argument("--lr-schedule", type=str, default="constant", help="constant|cosine")
+    p.add_argument("--warmup-epochs", type=float, default=0.0)
+    p.add_argument("--min-lr", type=float, default=0.0)
+
     p.add_argument("--train-weights", type=Path, default=None, help="CSV with columns id,weight")
 
     p.add_argument("--teacher-oof", type=Path, default=None, help="Teacher OOF CSV (id,y,oof_pred) for distillation")
@@ -175,6 +180,38 @@ def main(argv: list[str] | None = None) -> int:
     from flax import linen as nn
     from flax.training import train_state
     from flax import serialization
+
+    def _print_runtime_info() -> None:
+        import os
+        import sys
+        try:
+            import jaxlib  # type: ignore
+        except Exception:
+            jaxlib = None  # type: ignore
+
+        print(f"[runtime] python={sys.executable}", flush=True)
+        try:
+            jl_ver = getattr(jaxlib, "__version__", "unknown") if jaxlib is not None else "missing"
+            print(f"[runtime] jax={jax.__version__} jaxlib={jl_ver}", flush=True)
+        except Exception:
+            pass
+        if "JAX_PLATFORM_NAME" in os.environ:
+            print(f"[runtime] env JAX_PLATFORM_NAME={os.environ.get('JAX_PLATFORM_NAME')}", flush=True)
+
+        try:
+            backend = jax.default_backend()
+        except Exception:
+            backend = "unknown"
+        try:
+            devs = jax.devices()
+            dev_str = ", ".join([f"{d.platform}:{d.device_kind}" for d in devs])
+            ndev = len(devs)
+        except Exception:
+            dev_str = "unknown"
+            ndev = 0
+        print(f"[runtime] jax_backend={backend} n_devices={ndev} devices={dev_str}", flush=True)
+
+    _print_runtime_info()
 
     seeds = [int(s.strip()) for s in str(args.seeds).split(",") if s.strip()]
     if not seeds:
@@ -441,14 +478,39 @@ def main(argv: list[str] | None = None) -> int:
         dropout=dropout,
     )
 
-    def create_state(rng_key):
+    def create_state(rng_key, *, steps_per_epoch: int, epochs: int):
         params = model.init(
             {"params": rng_key, "dropout": rng_key},
             jnp.zeros((1, x_num_tr.shape[1]), dtype=jnp.float32),
             jnp.zeros((1, x_cat_tr.shape[1]), dtype=jnp.int32),
             train=True,
         )["params"]
-        tx = optax.adamw(learning_rate=float(args.lr), weight_decay=float(args.weight_decay))
+        lr0 = float(args.lr)
+        min_lr = float(args.min_lr)
+        schedule_kind = str(args.lr_schedule).strip().lower()
+        if schedule_kind not in {"constant", "cosine"}:
+            raise ValueError("--lr-schedule must be constant|cosine")
+
+        if schedule_kind == "constant":
+            lr_schedule = lr0
+        else:
+            total_steps = int(max(1, int(steps_per_epoch) * int(epochs)))
+            warmup_steps = int(max(0, round(float(args.warmup_epochs) * int(steps_per_epoch))))
+            warmup_steps = int(min(warmup_steps, max(0, total_steps - 1)))
+            lr_schedule = optax.warmup_cosine_decay_schedule(
+                init_value=min_lr,
+                peak_value=lr0,
+                warmup_steps=warmup_steps,
+                decay_steps=total_steps,
+                end_value=min_lr,
+            )
+
+        transforms = []
+        gc = float(args.grad_clip)
+        if gc and gc > 0:
+            transforms.append(optax.clip_by_global_norm(gc))
+        transforms.append(optax.adamw(learning_rate=lr_schedule, weight_decay=float(args.weight_decay)))
+        tx = optax.chain(*transforms)
         return train_state.TrainState.create(apply_fn=model.apply, params=params, tx=tx)
 
     def bce_with_logits(logits, y, w=None):
@@ -507,7 +569,25 @@ def main(argv: list[str] | None = None) -> int:
             y_va_f = y_hard[va_idx]
             w_va_f = base_w[va_idx]
 
-            state = create_state(jax.random.fold_in(key, f))
+            bs = int(args.batch_size)
+            n_train = int(len(tr_idx))
+            steps_per_epoch = int(max(1, (n_train + bs - 1) // bs))
+            state = create_state(jax.random.fold_in(key, f), steps_per_epoch=steps_per_epoch, epochs=int(args.epochs))
+
+            schedule_kind = str(args.lr_schedule).strip().lower()
+            if schedule_kind == "constant":
+                lr_fn = None
+            else:
+                total_steps = int(max(1, steps_per_epoch * int(args.epochs)))
+                warmup_steps = int(max(0, round(float(args.warmup_epochs) * steps_per_epoch)))
+                warmup_steps = int(min(warmup_steps, max(0, total_steps - 1)))
+                lr_fn = optax.warmup_cosine_decay_schedule(
+                    init_value=float(args.min_lr),
+                    peak_value=float(args.lr),
+                    warmup_steps=warmup_steps,
+                    decay_steps=total_steps,
+                    end_value=float(args.min_lr),
+                )
 
             # Resume from previous best checkpoint (if present).
             loaded_params, loaded_best = _try_load_best_params(seed=seed, fold=f, target_params=state.params)
@@ -518,24 +598,28 @@ def main(argv: list[str] | None = None) -> int:
             best_params = state.params
             bad = 0
 
-            bs = int(args.batch_size)
-
             for epoch in range(int(args.epochs)):
                 # shuffle train indices
                 perm = np.arange(len(tr_idx))
                 rng.shuffle(perm)
 
                 # train
-                n_train = len(perm)
-                n_batches = max(1, n_train // bs)
-                for bi in range(n_batches):
+                tr_loss_sum = 0.0
+                tr_w_sum = 0.0
+                for bi in range(steps_per_epoch):
                     j = perm[bi * bs : (bi + 1) * bs]
                     xb_num = jnp.asarray(xnum_tr_f[j], dtype=jnp.float32)
                     xb_cat = jnp.asarray(xcat_tr_f[j], dtype=jnp.int32)
                     yb = jnp.asarray(y_tr_f[j], dtype=jnp.float32)
                     wb = jnp.asarray(w_tr_f[j], dtype=jnp.float32)
                     key = jax.random.fold_in(key, epoch * 10_000 + bi)
-                    state, _ = train_step(state, (xb_num, xb_cat, yb, wb), key)
+                    state, loss_b = train_step(state, (xb_num, xb_cat, yb, wb), key)
+                    loss_b_f = float(loss_b)
+                    w_sum_b = float(np.asarray(w_tr_f[j], dtype=np.float64).sum())
+                    tr_loss_sum += loss_b_f * w_sum_b
+                    tr_w_sum += w_sum_b
+
+                tr_loss = tr_loss_sum / max(1e-12, tr_w_sum)
 
                 # eval
                 preds = []
@@ -551,7 +635,14 @@ def main(argv: list[str] | None = None) -> int:
                 ll = _logloss_np(y_va_f, p_va, w_va_f)
 
                 if args.verbose >= 2:
-                    print(f"[seed={seed} fold={f}] epoch={epoch+1} val_logloss={ll:.6f}", flush=True)
+                    if lr_fn is None:
+                        lr_now = float(args.lr)
+                    else:
+                        lr_now = float(lr_fn(int(epoch) * int(steps_per_epoch)))
+                    print(
+                        f"[seed={seed} fold={f}] epoch={epoch+1} train_bce={tr_loss:.6f} val_logloss={ll:.6f} lr={lr_now:.6g}",
+                        flush=True,
+                    )
 
                 if ll + 1e-6 < best_loss:
                     best_loss = ll
