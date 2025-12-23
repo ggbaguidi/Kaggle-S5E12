@@ -61,7 +61,10 @@ def compute_adv_weights_sklearn(
     x_cat_s = np.concatenate([x_cat_train[train_idx], x_cat_test[test_idx]], axis=0)
     x_num_s = np.concatenate([x_num_train[train_idx], x_num_test[test_idx]], axis=0)
     y_s = np.concatenate(
-        [np.zeros((len(train_idx),), dtype=np.int32), np.ones((len(test_idx),), dtype=np.int32)],
+        [
+            np.zeros((len(train_idx),), dtype=np.int32),
+            np.ones((len(test_idx),), dtype=np.int32),
+        ],
         axis=0,
     )
 
@@ -119,10 +122,14 @@ def _make_state(
         train=True,
     )
     tx = optax.adamw(learning_rate=learning_rate, weight_decay=weight_decay)
-    return TrainState.create(apply_fn=model.apply, params=variables["params"], tx=tx, dropout_rng=dropout_rng)
+    return TrainState.create(
+        apply_fn=model.apply, params=variables["params"], tx=tx, dropout_rng=dropout_rng
+    )
 
 
-def _init_state(rng: jax.Array, cfg: ModelConfig, n_cat: int) -> tuple[TabularEmbedMLP, TrainState]:
+def _init_state(
+    rng: jax.Array, cfg: ModelConfig, n_cat: int
+) -> tuple[TabularEmbedMLP, TrainState]:
     model = TabularEmbedMLP(cfg)
     params_rng, dropout_rng = jax.random.split(rng)
     variables = model.init(
@@ -132,7 +139,9 @@ def _init_state(rng: jax.Array, cfg: ModelConfig, n_cat: int) -> tuple[TabularEm
         train=True,
     )
     tx = optax.adamw(learning_rate=2e-3, weight_decay=1e-4)
-    state = TrainState.create(apply_fn=model.apply, params=variables["params"], tx=tx, dropout_rng=dropout_rng)
+    state = TrainState.create(
+        apply_fn=model.apply, params=variables["params"], tx=tx, dropout_rng=dropout_rng
+    )
     return model, state
 
 
@@ -161,7 +170,10 @@ def compute_adv_weights(
     x_cat = np.concatenate([x_cat_train[train_idx], x_cat_test[test_idx]], axis=0)
     x_num = np.concatenate([x_num_train[train_idx], x_num_test[test_idx]], axis=0)
     y = np.concatenate(
-        [np.zeros((len(train_idx),), dtype=np.float32), np.ones((len(test_idx),), dtype=np.float32)],
+        [
+            np.zeros((len(train_idx),), dtype=np.float32),
+            np.ones((len(test_idx),), dtype=np.float32),
+        ],
         axis=0,
     )
 
@@ -190,7 +202,9 @@ def compute_adv_weights(
         train=True,
     )
     tx = optax.adamw(learning_rate=adv_cfg.lr, weight_decay=adv_cfg.weight_decay)
-    state = TrainState.create(apply_fn=model.apply, params=variables["params"], tx=tx, dropout_rng=dropout_rng)
+    state = TrainState.create(
+        apply_fn=model.apply, params=variables["params"], tx=tx, dropout_rng=dropout_rng
+    )
 
     @jax.jit
     def train_step(state: TrainState, x_cat_b, x_num_b, y_b):
@@ -198,7 +212,11 @@ def compute_adv_weights(
 
         def loss_fn(params):
             logits = state.apply_fn(
-                {"params": params}, x_cat_b, x_num_b, train=True, rngs={"dropout": dropout_rng}
+                {"params": params},
+                x_cat_b,
+                x_num_b,
+                train=True,
+                rngs={"dropout": dropout_rng},
             )
             loss = jnp.mean(_bce_logits(logits, y_b))
             return loss
@@ -229,7 +247,9 @@ def compute_adv_weights(
     bs = adv_cfg.batch_size
     for start in range(0, n_train, bs):
         sl = slice(start, start + bs)
-        logits = pred_logits(state.params, jnp.asarray(x_cat_train[sl]), jnp.asarray(x_num_train[sl]))
+        logits = pred_logits(
+            state.params, jnp.asarray(x_cat_train[sl]), jnp.asarray(x_num_train[sl])
+        )
         p = jax.nn.sigmoid(logits)
         probs[sl] = np.asarray(p, dtype=np.float32)
 

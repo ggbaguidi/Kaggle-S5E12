@@ -73,12 +73,16 @@ def _parse_mono_arg(mono: str) -> dict[str, int]:
         if not chunk:
             continue
         if ":" not in chunk:
-            raise ValueError(f"Invalid --mono entry '{chunk}'. Expected format like age:+1")
+            raise ValueError(
+                f"Invalid --mono entry '{chunk}'. Expected format like age:+1"
+            )
         name, sign = chunk.split(":", 1)
         name = name.strip()
         sign_i = int(sign.strip())
         if sign_i not in (-1, 0, 1):
-            raise ValueError(f"Invalid mono sign for '{name}': {sign_i} (allowed: -1,0,+1)")
+            raise ValueError(
+                f"Invalid mono sign for '{name}': {sign_i} (allowed: -1,0,+1)"
+            )
         out[name] = sign_i
     return out
 
@@ -96,7 +100,9 @@ def make_state(
     weight_decay: float,
 ) -> TrainState:
     tx = optax.adamw(learning_rate=lr, weight_decay=weight_decay)
-    return TrainState.create(apply_fn=model.apply, params=params, tx=tx, dropout_rng=dropout_rng)
+    return TrainState.create(
+        apply_fn=model.apply, params=params, tx=tx, dropout_rng=dropout_rng
+    )
 
 
 def predict_logits_in_batches(
@@ -331,7 +337,11 @@ def main() -> None:
     enc = fit_encoders(train_df, test_df, spec)
 
     y = train_df[target_col].to_numpy(dtype=np.float32)
-    ids_test = test_df[id_col].to_numpy() if id_col in test_df.columns else np.arange(len(test_df))
+    ids_test = (
+        test_df[id_col].to_numpy()
+        if id_col in test_df.columns
+        else np.arange(len(test_df))
+    )
 
     x_cat_train, x_num_train = transform_df(train_df, spec, enc)
     x_cat_test, x_num_test = transform_df(test_df, spec, enc)
@@ -351,7 +361,9 @@ def main() -> None:
             mono_sign.append(sgn)
 
     mono_idx_arr = jnp.asarray(np.array(mono_idx, dtype=np.int32)) if mono_idx else None
-    mono_sign_arr = jnp.asarray(np.array(mono_sign, dtype=np.float32)) if mono_sign else None
+    mono_sign_arr = (
+        jnp.asarray(np.array(mono_sign, dtype=np.float32)) if mono_sign else None
+    )
     mono_k = int(min(int(args.mono_k), len(mono_idx))) if mono_idx else 0
 
     if args.use_mono:
@@ -359,7 +371,9 @@ def main() -> None:
         if mono_idx:
             inv_num_cols = list(spec.num_cols)
             kept_cols = [(inv_num_cols[i], int(s)) for i, s in zip(mono_idx, mono_sign)]
-        print(f"monotone: enabled cols={kept_cols} lambda={args.mono_lambda} delta={args.mono_delta} k={mono_k}")
+        print(
+            f"monotone: enabled cols={kept_cols} lambda={args.mono_lambda} delta={args.mono_delta} k={mono_k}"
+        )
 
     mono_lambda = float(args.mono_lambda)
     mono_delta = float(args.mono_delta)
@@ -380,7 +394,11 @@ def main() -> None:
 
     cat_cards = [spec.cat_cardinalities[c] for c in spec.cat_cols]
 
-    if args.add_dist_features and (not args.dist_per_feature_llr) and (not args.dist_nb_logit):
+    if (
+        args.add_dist_features
+        and (not args.dist_per_feature_llr)
+        and (not args.dist_nb_logit)
+    ):
         # sensible default: include both when user enables dist features
         args.dist_per_feature_llr = True
         args.dist_nb_logit = True
@@ -408,14 +426,18 @@ def main() -> None:
             cfg=dist_cfg,
             seed=args.seed,
         )
-        shift_train = transform_shift_features(sh, x_cat_train, x_num_train, cfg=dist_cfg)
+        shift_train = transform_shift_features(
+            sh, x_cat_train, x_num_train, cfg=dist_cfg
+        )
         shift_test = transform_shift_features(sh, x_cat_test, x_num_test, cfg=dist_cfg)
         print(f"dist: shift features train={shift_train.shape} test={shift_test.shape}")
 
     # Adversarial weights (computed once on full train)
     w_train = None
     if args.use_adv_weights:
-        print(f"adv: learning weights kind={args.adv_kind} max_rows={args.adv_max_rows}")
+        print(
+            f"adv: learning weights kind={args.adv_kind} max_rows={args.adv_max_rows}"
+        )
         adv_cfg = AdvConfig(
             epochs=args.adv_epochs,
             batch_size=args.batch_size,
@@ -469,7 +491,9 @@ def main() -> None:
             )
             llr_tr, nb_tr = transform_llr_features(est, xct, xnt, cfg=dist_cfg)
             llr_va, nb_va = transform_llr_features(est, xcv, xnv, cfg=dist_cfg)
-            llr_te, nb_te = transform_llr_features(est, x_cat_test, x_num_test, cfg=dist_cfg)
+            llr_te, nb_te = transform_llr_features(
+                est, x_cat_test, x_num_test, cfg=dist_cfg
+            )
 
             extra_tr = []
             extra_va = []
@@ -483,17 +507,25 @@ def main() -> None:
                 extra_tr.append(nb_tr)
                 extra_va.append(nb_va)
                 extra_te.append(nb_te)
-            if dist_cfg.add_shift and shift_train is not None and shift_test is not None:
+            if (
+                dist_cfg.add_shift
+                and shift_train is not None
+                and shift_test is not None
+            ):
                 extra_tr.append(shift_train[tr])
                 extra_va.append(shift_train[va])
                 extra_te.append(shift_test)
 
             if extra_tr:
-                xnt = np.concatenate([xnt] + extra_tr, axis=1).astype(np.float32, copy=False)
-                xnv = np.concatenate([xnv] + extra_va, axis=1).astype(np.float32, copy=False)
-                x_num_test_fold = np.concatenate([x_num_test] + extra_te, axis=1).astype(
+                xnt = np.concatenate([xnt] + extra_tr, axis=1).astype(
                     np.float32, copy=False
                 )
+                xnv = np.concatenate([xnv] + extra_va, axis=1).astype(
+                    np.float32, copy=False
+                )
+                x_num_test_fold = np.concatenate(
+                    [x_num_test] + extra_te, axis=1
+                ).astype(np.float32, copy=False)
 
         cfg = ModelConfig(
             cat_cardinalities=cat_cards,
@@ -542,9 +574,15 @@ def main() -> None:
                 loss = jnp.mean(loss_vec)
 
                 # PINN-like constraint: monotonicity penalty on selected numeric features.
-                if mono_k > 0 and mono_idx_arr is not None and mono_sign_arr is not None:
+                if (
+                    mono_k > 0
+                    and mono_idx_arr is not None
+                    and mono_sign_arr is not None
+                ):
                     # use deterministic logits for constraint to reduce dropout noise
-                    logits_base = state.apply_fn({"params": params}, xc, xn, train=False)
+                    logits_base = state.apply_fn(
+                        {"params": params}, xc, xn, train=False
+                    )
                     mono_rng, _ = jax.random.split(new_dropout_rng)
                     sel = jax.random.choice(
                         mono_rng,
@@ -556,8 +594,12 @@ def main() -> None:
                     f_sign = mono_sign_arr[sel]
 
                     def one_pen(idx, sign):
-                        xn_pert = xn.at[:, idx].add(jnp.asarray(mono_delta, dtype=xn.dtype))
-                        logits_pert = state.apply_fn({"params": params}, xc, xn_pert, train=False)
+                        xn_pert = xn.at[:, idx].add(
+                            jnp.asarray(mono_delta, dtype=xn.dtype)
+                        )
+                        logits_pert = state.apply_fn(
+                            {"params": params}, xc, xn_pert, train=False
+                        )
                         margin = sign * (logits_pert - logits_base)
                         return jnp.mean(nn.relu(-margin))
 

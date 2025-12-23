@@ -137,7 +137,9 @@ def transform_df(
     return X_cat, X_num
 
 
-def load_dataframes(train_path: str, test_path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def load_dataframes(
+    train_path: str, test_path: str
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     train_df = pd.read_csv(train_path)
     test_df = pd.read_csv(test_path)
     return train_df, test_df

@@ -101,8 +101,12 @@ def fit_llr_estimator(
         num_count1 = np.zeros((n_num, num_bins), dtype=np.float32)
         for j in range(n_num):
             b = _digitize_1d(x_num[:, j], edges[j])
-            num_count1[j] = np.bincount(b, weights=y01, minlength=num_bins).astype(np.float32)
-            num_count0[j] = np.bincount(b, weights=1.0 - y01, minlength=num_bins).astype(np.float32)
+            num_count1[j] = np.bincount(b, weights=y01, minlength=num_bins).astype(
+                np.float32
+            )
+            num_count0[j] = np.bincount(
+                b, weights=1.0 - y01, minlength=num_bins
+            ).astype(np.float32)
     else:
         edges = np.zeros((0, num_bins - 1), dtype=np.float32)
         num_count0 = np.zeros((0, num_bins), dtype=np.float32)
@@ -165,7 +169,9 @@ def transform_llr_features(
         per_feature = np.zeros((n_rows, 0), dtype=np.float32)
 
     if cfg.add_nb_logit and llrs:
-        nb = np.sum(np.stack(llrs, axis=1), axis=1, keepdims=True).astype(np.float32, copy=False)
+        nb = np.sum(np.stack(llrs, axis=1), axis=1, keepdims=True).astype(
+            np.float32, copy=False
+        )
     else:
         nb = np.zeros((n_rows, 0), dtype=np.float32)
 
@@ -210,8 +216,12 @@ def fit_shift_estimator(
         for j in range(n_num):
             b_tr = _digitize_1d(x_num_train[:, j], edges[j])
             b_te = _digitize_1d(x_num_test[:, j], edges[j])
-            num_train_counts[j] = np.bincount(b_tr, minlength=num_bins).astype(np.float32)
-            num_test_counts[j] = np.bincount(b_te, minlength=num_bins).astype(np.float32)
+            num_train_counts[j] = np.bincount(b_tr, minlength=num_bins).astype(
+                np.float32
+            )
+            num_test_counts[j] = np.bincount(b_te, minlength=num_bins).astype(
+                np.float32
+            )
     else:
         edges = np.zeros((0, num_bins - 1), dtype=np.float32)
         num_train_counts = np.zeros((0, num_bins), dtype=np.float32)
@@ -246,7 +256,9 @@ def transform_shift_features(
         p_te = (cte + alpha) / (est.n_test + alpha * card)
         p_tr = (ctr + alpha) / (est.n_train + alpha * card)
         col = x_cat[:, j]
-        out.append((np.log(p_te[col]) - np.log(p_tr[col])).astype(np.float32, copy=False))
+        out.append(
+            (np.log(p_te[col]) - np.log(p_tr[col])).astype(np.float32, copy=False)
+        )
 
     # numeric
     for j in range(x_num.shape[1]):
