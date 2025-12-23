@@ -58,7 +58,13 @@ run() {
 : "${VENV_ACTIVATE:=.venv/bin/activate}"
 
 export PYTHONUNBUFFERED=1
-export JAX_PLATFORM_NAME="${JAX_PLATFORM_NAME:-cpu}"
+
+# Prefer the repository venv Python if present (helps ensure CUDA-enabled jaxlib is used).
+if [[ -x ".venv/bin/python" ]]; then
+  PYTHON_BIN=".venv/bin/python"
+fi
+
+# Do not force CPU by default. To force CPU, run with: `JAX_PLATFORM_NAME=cpu ./run_all_jax.sh`
 
 # Grokking experiment mode
 # When GROK_MODE=1, defaults are adjusted to make a grokking-like transition
