@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Parse training logs and plot validation metrics progression.
+"""Parse training logs and plot metric progression.
 
-Works with log lines like:
-  [seed=42 fold=0] epoch=31 val_logloss=0.605384
+Supports both legacy and current log formats, e.g.:
+    [seed=42 fold=0] epoch=31 val_logloss=0.605384
+    [seed=42 fold=0] epoch=31 train_bce=0.523100 val_logloss=0.605384 lr=0.001
 
 Usage:
   python plot_metrics_from_log.py --log logs/.../01_jax_teacher.log
@@ -14,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -22,27 +22,43 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
-LINE_RE = re.compile(
-    r"^\[seed=(?P<seed>\d+)\s+fold=(?P<fold>\d+)\]\s+epoch=(?P<epoch>\d+)\s+(?P<metric>val_[A-Za-z0-9_]+)=(?P<value>[-+0-9.]+(?:[eE][-+]?\d+)?)\s*$"
+PREFIX_RE = re.compile(
+    r"^\[seed=(?P<seed>\d+)\s+fold=(?P<fold>\d+)\]\s+epoch=(?P<epoch>\d+)\s+(?P<rest>.*)$"
 )
 
 
 def parse_lines(lines: Iterable[str]) -> pd.DataFrame:
     rows: list[dict] = []
     for line in lines:
-        m = LINE_RE.match(line.strip())
+        m = PREFIX_RE.match(line.strip())
         if not m:
             continue
+
         d = m.groupdict()
-        rows.append(
-            {
-                "seed": int(d["seed"]),
-                "fold": int(d["fold"]),
-                "epoch": int(d["epoch"]),
-                "metric": d["metric"],
-                "value": float(d["value"]),
-            }
-        )
+        seed = int(d["seed"])
+        fold = int(d["fold"])
+        epoch = int(d["epoch"])
+        rest = str(d["rest"]).strip()
+
+        # Parse tokens like key=value. This covers both:
+        #   val_logloss=...
+        #   train_bce=... val_logloss=... lr=...
+        for tok in rest.split():
+            if "=" not in tok:
+                continue
+            k, v = tok.split("=", 1)
+            k = k.strip()
+            v = v.strip().rstrip(",")
+            if not k:
+                continue
+            try:
+                val = float(v)
+            except Exception:
+                try:
+                    val = float(v.lower())
+                except Exception:
+                    continue
+            rows.append({"seed": seed, "fold": fold, "epoch": epoch, "metric": k, "value": val})
 
     if not rows:
         return pd.DataFrame(columns=["seed", "fold", "epoch", "metric", "value"])
@@ -60,7 +76,11 @@ def metric_direction(metric: str) -> str:
     m = metric.lower()
     if "auc" in m:
         return "max"
+    if m in {"lr", "learning_rate"}:
+        return "min"
     if "loss" in m:
+        return "min"
+    if "bce" in m:
         return "min"
     # conservative default: assume it's a loss-like metric
     return "min"
@@ -137,7 +157,7 @@ def main() -> int:
     )
     if df.empty:
         raise SystemExit(
-            "No matching metric lines found. Expected lines like: '[seed=42 fold=0] epoch=1 val_logloss=0.603455'"
+            "No matching epoch metric lines found. Expected lines like: '[seed=42 fold=0] epoch=1 val_logloss=0.603455'"
         )
 
     stem = log_path.stem
