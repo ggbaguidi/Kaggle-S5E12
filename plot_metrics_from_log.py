@@ -173,6 +173,30 @@ def main() -> int:
         outpath = outdir / f"{stem}_{metric}.png"
         plot_metric(df_m, metric=metric, outpath=outpath, title_prefix=f"{stem} | ")
 
+    # Combined train/validation plot (if both metrics exist)
+    def _epoch_mean(df_subset: pd.DataFrame) -> pd.DataFrame:
+        return (
+            df_subset.groupby("epoch", as_index=False)["value"].mean().sort_values("epoch")
+        )
+
+    if "train_bce" in df["metric"].values and "val_logloss" in df["metric"].values:
+        df_train = _epoch_mean(df[df["metric"] == "train_bce"])
+        df_val = _epoch_mean(df[df["metric"] == "val_logloss"])
+        if not df_train.empty and not df_val.empty:
+            plt.figure(figsize=(10, 5))
+            plt.plot(df_train["epoch"], df_train["value"], marker="o", markersize=3, linewidth=1.5, label="train_bce")
+            plt.plot(df_val["epoch"], df_val["value"], marker="s", markersize=3, linewidth=1.5, label="val_logloss")
+            plt.title(f"{stem} | train_bce vs val_logloss")
+            plt.xlabel("epoch")
+            plt.ylabel("loss")
+            plt.grid(True, alpha=0.25)
+            plt.legend(loc="best", fontsize=9)
+            combined_path = outdir / f"{stem}_train_vs_val.png"
+            plt.tight_layout()
+            plt.savefig(combined_path, dpi=160)
+            plt.close()
+            print(f"plots: train vs val saved to {combined_path}")
+
     # Print quick summary
     print(f"Parsed {len(df)} points from {log_path}")
     print(f"Metrics: {sorted(df['metric'].unique())}")
